@@ -1,0 +1,1033 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NewShire AMI Verification Calculator</title>
+<link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700;800;900&family=Source+Code+Pro:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Source Sans 3', 'Segoe UI', sans-serif; background: #1C3740; }
+  #root { min-height: 100vh; }
+</style>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-type="module">
+const { useState, useEffect, useCallback, useRef } = React;
+
+// ============================================================
+// ⚙️  CONFIGURATION — UPDATE FOR YOUR ENVIRONMENT
+// ============================================================
+const CONFIG = {
+  clientId: "32e75ffa-747a-4cf0-8209-6a19150c4547",
+  tenantId: "33575d04-ca7b-4396-8011-9eaea4030b46",
+  siteId: "vanrockre.sharepoint.com,a02c1cd8-9f1f-4827-8286-7b6b7ce74232,01202419-6625-4499-b0d5-8ceb1cffdba3",
+  listName: "AMI Verification Log",
+  configListName: "AMI Calculator Config",
+  isConfigured: true,
+
+  // Emails allowed to access the Admin panel (lowercase)
+  adminEmails: [
+    "bturner@newshirepm.com",
+    "cmunson@newshirepm.com",
+    "jwhite@vanrockre.com",
+  ],
+};
+
+const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
+
+// ============================================================
+// DEFAULT DATA — Used as fallback until saved to SharePoint
+// ============================================================
+const DEFAULT_INCOME_LIMITS = {
+  label: "FY 2025 HUD Income Limits — Spartanburg County, SC",
+  medianIncome: 82400,
+  tiers: [0.3, 0.5, 0.6, 0.8, 1.0],
+  personCounts: [1, 2, 3, 4, 5, 6, 7, 8],
+  limits: [
+    [17300, 19750, 22200, 24650, 26650, 28600, 30600, 32550],
+    [28750, 32850, 36950, 41050, 44350, 47650, 50950, 54200],
+    [34500, 39420, 44340, 49260, 53220, 57180, 61140, 65040],
+    [46000, 52600, 59150, 65700, 71000, 76250, 81500, 86750],
+    [57700, 65950, 74200, 82400, 89000, 95600, 102200, 108800],
+  ],
+};
+
+const DEFAULT_PROPERTIES = [
+  { name: "701 East Main Condos", units: [
+    { bedrooms: 0, ami: 0.6, maxRent: 860, marketRent: 860, count: 5 },
+    { bedrooms: 0, ami: 0.8, maxRent: 1150, marketRent: 960, count: 6 },
+    { bedrooms: 1, ami: 0.6, maxRent: 920, marketRent: 920, count: 1 },
+  ]},
+  { name: "City View", units: [
+    { bedrooms: 1, ami: 0.6, maxRent: 920, marketRent: 895, count: 7 },
+    { bedrooms: 1, ami: 0.8, maxRent: 1230, marketRent: 955, count: 11 },
+    { bedrooms: 2, ami: 0.6, maxRent: 1105, marketRent: 1095, count: 7 },
+    { bedrooms: 2, ami: 0.8, maxRent: 1475, marketRent: 1195, count: 3 },
+  ]},
+  { name: "Fusion Pointe", units: [
+    { bedrooms: 1, ami: 0.6, maxRent: 920, marketRent: 600, count: 14 },
+    { bedrooms: 3, ami: 0.6, maxRent: 1280, marketRent: 1280, count: 9 },
+    { bedrooms: 3, ami: 0.8, maxRent: 1705, marketRent: 1285, count: 15 },
+    { bedrooms: 4, ami: 0.6, maxRent: 1430, marketRent: 1375, count: 11 },
+    { bedrooms: 4, ami: 0.8, maxRent: 1905, marketRent: 1375, count: 13 },
+  ]},
+  { name: "Liberty Square", units: [
+    { bedrooms: 1, ami: 0.5, maxRent: 770, marketRent: 770, count: 4 },
+    { bedrooms: 2, ami: 0.5, maxRent: 900, marketRent: 900, count: 4 },
+    { bedrooms: 2, ami: 0.8, maxRent: 1400, marketRent: 1064, count: 19 },
+    { bedrooms: 3, ami: 0.8, maxRent: 1608, marketRent: 1375, count: 3 },
+  ]},
+  { name: "Townes at Converse", units: [
+    { bedrooms: 3, ami: 0.5, maxRent: 1067, marketRent: 1067, count: 16 },
+    { bedrooms: 3, ami: 0.8, maxRent: 1708, marketRent: 1708, count: 43 },
+  ]},
+];
+
+const PAY_FREQUENCIES = [
+  { label: "Weekly", multiplier: 52 }, { label: "BiWeekly", multiplier: 26 },
+  { label: "Semi Monthly", multiplier: 24 }, { label: "Monthly", multiplier: 12 },
+];
+const OTHER_INCOME_FREQUENCIES = [
+  { label: "Weekly", multiplier: 52 }, { label: "BiWeekly", multiplier: 26 },
+  { label: "Semi Monthly", multiplier: 24 }, { label: "Monthly", multiplier: 12 },
+  { label: "Bi Monthly", multiplier: 6 }, { label: "Quarterly", multiplier: 4 },
+  { label: "Semi Annually", multiplier: 2 }, { label: "Annually", multiplier: 1 },
+];
+const OTHER_INCOME_TYPES = [
+  "Child Support","SSI/SSDI","Pension","VA Benefits","Unemployment",
+  "Self Employment","Interest/Dividends","W2 Verified Employment","Other"
+];
+
+// ============================================================
+// BRAND PALETTE
+// ============================================================
+const B = {
+  teal900:"#1C3740", teal800:"#213F4A", teal700:"#28434C", teal600:"#2F5260",
+  teal500:"#3A6577", teal400:"#4A7E91", teal300:"#6FA0B0", teal200:"#A3C5CF",
+  teal100:"#D6E7EC", teal50:"#EDF4F7",
+  gold700:"#9E7B2F", gold600:"#B8922E", gold500:"#CDA04B", gold400:"#D4AF61",
+  gold300:"#E0C680", gold200:"#EDDAAC", gold100:"#F8F0DB", gold50:"#FFFBF0",
+  white:"#F1F3F2", offWhite:"#F7F8F7", gray100:"#E8EAEA", gray200:"#D0D4D4",
+  gray300:"#A8B0B0", gray400:"#7A8585", gray500:"#5A6666", gray600:"#3E4A4A", dark:"#1A2A30",
+  approved:"#3DA06B", approvedBg:"rgba(61,160,107,0.08)", approvedBr:"rgba(61,160,107,0.3)",
+  denied:"#D35B4B", deniedBg:"rgba(211,91,75,0.08)", deniedBr:"rgba(211,91,75,0.3)",
+  warnBg:"rgba(205,160,75,0.08)", warnBr:"rgba(205,160,75,0.3)",
+};
+const fontBody = "'Source Sans 3', 'Segoe UI', sans-serif";
+const fontMono = "'Source Code Pro', 'Fira Code', monospace";
+
+// ============================================================
+// CORE CALC
+// ============================================================
+function getAnchorPersons(br) { return br === 0 ? 1 : Math.ceil(br * 1.5); }
+function getEffective(br, occ) { return Math.max(occ || getAnchorPersons(br), getAnchorPersons(br)); }
+function getLimit(tier, persons, lim) {
+  const ti = lim.tiers.indexOf(tier), pi = lim.personCounts.indexOf(persons);
+  return ti === -1 || pi === -1 ? null : lim.limits[ti][pi];
+}
+function calcPaystub(stubs, freq) {
+  const v = stubs.filter(s => s !== "" && !isNaN(Number(s)));
+  if (!v.length) return 0;
+  const f = PAY_FREQUENCIES.find(x => x.label === freq);
+  return (v.reduce((a, b) => a + Number(b), 0) / v.length) * (f ? f.multiplier : 0);
+}
+function calcOffer(hr, hpw, sal) {
+  if (sal && Number(sal) > 0) return Number(sal);
+  return hr && hpw ? Number(hr) * Number(hpw) * 52 : 0;
+}
+function calcBank(deps) {
+  const v = deps.filter(d => d !== "" && !isNaN(Number(d)));
+  return v.length ? (v.reduce((a, b) => a + Number(b), 0) / v.length) * 12 : 0;
+}
+function calcOther(items) {
+  return items.reduce((t, i) => {
+    if (!i.amount || !i.frequency) return t;
+    const f = OTHER_INCOME_FREQUENCIES.find(x => x.label === i.frequency);
+    return t + Number(i.amount) * (f ? f.multiplier : 0);
+  }, 0);
+}
+function runVerify({ tier, br, occ, income, rent, lim }) {
+  const eff = getEffective(br, occ), limit = getLimit(tier, eff, lim);
+  const minMo = rent * 2.5, mo = income / 12, anchor = getAnchorPersons(br);
+  if (income > limit) return { result:"DENIED", reason:"Income Exceeds AMI Limit", variance:income-limit, limit, eff, anchor, minMo, mo, tier };
+  if (mo < minMo) return { result:"DENIED", reason:"Below Minimum Income (2.5x Rent)", variance:(minMo-mo)*12, limit, eff, anchor, minMo, mo, tier };
+  return { result:"APPROVED", reason:null, variance:0, limit, eff, anchor, minMo, mo, tier };
+}
+
+// ============================================================
+// MSAL AUTH
+// ============================================================
+function useMsal() {
+  const [state, setState] = useState({ status:"idle", user:null, error:null });
+  const ref = useRef(null);
+  const getToken = useCallback(async () => {
+    if (!CONFIG.isConfigured) return null;
+    try {
+      if (!window.msal) {
+        await new Promise((res, rej) => {
+          const s = document.createElement("script");
+          s.src = "https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js";
+          s.onload = () => { const c = setInterval(() => { if (window.msal){clearInterval(c);res();} },100); setTimeout(()=>{clearInterval(c);rej(new Error("MSAL timeout"));},10000); };
+          s.onerror = () => rej(new Error("MSAL load failed"));
+          document.head.appendChild(s);
+        });
+      }
+      if (!ref.current) {
+        ref.current = new window.msal.PublicClientApplication({
+          auth:{clientId:CONFIG.clientId,authority:`https://login.microsoftonline.com/${CONFIG.tenantId}`,redirectUri:window.location.origin},
+          cache:{cacheLocation:"sessionStorage"},
+        });
+        await ref.current.initialize();
+      }
+      const accts = ref.current.getAllAccounts(), scopes = ["Sites.ReadWrite.All"];
+      if (accts.length) {
+        try { const r = await ref.current.acquireTokenSilent({scopes,account:accts[0]}); setState({status:"ok",user:accts[0],error:null}); return r.accessToken; } catch{}
+      }
+      const r = await ref.current.acquireTokenPopup({scopes});
+      setState({status:"ok",user:r.account,error:null}); return r.accessToken;
+    } catch(e) { setState({status:"error",user:null,error:e.message}); return null; }
+  },[]);
+  return { ...state, getToken };
+}
+
+// ============================================================
+// SHAREPOINT API — Audit Log
+// ============================================================
+async function getListIdByName(tok, name) {
+  const r = await fetch(`${GRAPH_BASE}/sites/${CONFIG.siteId}/lists?$filter=displayName eq '${name}'`, { headers:{Authorization:`Bearer ${tok}`} });
+  const d = await r.json(); return d.value?.[0]?.id || null;
+}
+async function writeRecord(tok, rec) {
+  const lid = await getListIdByName(tok, CONFIG.listName);
+  if (!lid) throw new Error(`List "${CONFIG.listName}" not found`);
+  const r = await fetch(`${GRAPH_BASE}/sites/${CONFIG.siteId}/lists/${lid}/items`, {
+    method:"POST", headers:{Authorization:`Bearer ${tok}`,"Content-Type":"application/json"},
+    body:JSON.stringify({fields:rec}),
+  });
+  if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e?.error?.message||`Error ${r.status}`); }
+  return r.json();
+}
+async function fetchHistory(tok, n=50) {
+  const lid = await getListIdByName(tok, CONFIG.listName); if (!lid) return [];
+  const r = await fetch(`${GRAPH_BASE}/sites/${CONFIG.siteId}/lists/${lid}/items?$expand=fields&$top=${n}&$orderby=fields/DateCompleted desc`, {headers:{Authorization:`Bearer ${tok}`}});
+  if (!r.ok) return [];
+  const d = await r.json(); return (d.value||[]).map(i=>i.fields);
+}
+
+// ============================================================
+// SHAREPOINT API — Config Persistence
+// ============================================================
+async function loadConfig(tok) {
+  const lid = await getListIdByName(tok, CONFIG.configListName);
+  if (!lid) return null;
+  const r = await fetch(`${GRAPH_BASE}/sites/${CONFIG.siteId}/lists/${lid}/items?$expand=fields&$top=10&$orderby=fields/Modified desc`, {headers:{Authorization:`Bearer ${tok}`}});
+  if (!r.ok) return null;
+  const d = await r.json();
+  if (!d.value?.length) return null;
+  const latest = d.value[0].fields;
+  try {
+    return {
+      itemId: d.value[0].id,
+      incomeLimits: JSON.parse(latest.IncomeLimitsJSON),
+      properties: JSON.parse(latest.PropertiesJSON),
+      lastModified: latest.Modified,
+      modifiedBy: latest.ModifiedByName || "Unknown",
+    };
+  } catch { return null; }
+}
+
+async function saveConfig(tok, incomeLimits, properties, modifiedBy) {
+  const lid = await getListIdByName(tok, CONFIG.configListName);
+  if (!lid) throw new Error(`List "${CONFIG.configListName}" not found. Create it first (see setup guide).`);
+
+  const fields = {
+    Title: `Config ${new Date().toISOString().slice(0,10)}`,
+    IncomeLimitsJSON: JSON.stringify(incomeLimits),
+    PropertiesJSON: JSON.stringify(properties),
+    ModifiedByName: modifiedBy,
+  };
+
+  // Check if existing item exists
+  const existing = await loadConfig(tok);
+  if (existing?.itemId) {
+    const r = await fetch(`${GRAPH_BASE}/sites/${CONFIG.siteId}/lists/${lid}/items/${existing.itemId}`, {
+      method:"PATCH", headers:{Authorization:`Bearer ${tok}`,"Content-Type":"application/json"},
+      body:JSON.stringify({fields}),
+    });
+    if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e?.error?.message||`Error ${r.status}`); }
+    return;
+  }
+  // Create new
+  const r = await fetch(`${GRAPH_BASE}/sites/${CONFIG.siteId}/lists/${lid}/items`, {
+    method:"POST", headers:{Authorization:`Bearer ${tok}`,"Content-Type":"application/json"},
+    body:JSON.stringify({fields}),
+  });
+  if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e?.error?.message||`Error ${r.status}`); }
+}
+
+// ============================================================
+// SHARED UI COMPONENTS
+// ============================================================
+const inputCss = {
+  background:B.teal900,border:`1px solid ${B.teal600}`,borderRadius:"4px",color:B.white,
+  padding:"7px 9px",fontSize:"12.5px",outline:"none",width:"100%",boxSizing:"border-box",
+  transition:"border-color 0.2s, box-shadow 0.2s",fontFamily:fontMono,
+};
+const lblCss = {
+  display:"block",fontSize:"10px",fontWeight:700,color:B.teal300,marginBottom:"3px",
+  textTransform:"uppercase",letterSpacing:"0.6px",fontFamily:fontBody,
+};
+const secCss = {
+  fontSize:"11px",fontWeight:800,color:B.gold500,textTransform:"uppercase",
+  letterSpacing:"1.2px",marginBottom:"10px",fontFamily:fontBody,
+  borderBottom:`1px solid ${B.teal600}`,paddingBottom:"7px",
+};
+
+function F({label,children,style}) { return <div style={{marginBottom:"8px",...style}}><label style={lblCss}>{label}</label>{children}</div>; }
+function I({value,onChange,placeholder,type="text",style,disabled}) {
+  return <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} disabled={disabled}
+    style={{...inputCss,opacity:disabled?0.5:1,...style}}
+    onFocus={e=>{e.target.style.borderColor=B.gold500;e.target.style.boxShadow=`0 0 0 2px ${B.gold500}22`;}}
+    onBlur={e=>{e.target.style.borderColor=B.teal600;e.target.style.boxShadow="none";}}/>;
+}
+function Sel({value,onChange,options,placeholder,style}) {
+  return <select value={value} onChange={e=>onChange(e.target.value)} style={{...inputCss,cursor:"pointer",...style}}>
+    {placeholder&&<option value="">{placeholder}</option>}
+    {options.map(o=><option key={typeof o==="string"?o:o.value} value={typeof o==="string"?o:o.value}>{typeof o==="string"?o:o.label}</option>)}
+  </select>;
+}
+function Card({children,style}) { return <div style={{background:B.teal800,border:`1px solid ${B.teal600}`,borderRadius:"6px",padding:"14px",...style}}>{children}</div>; }
+function Mon({amount,style}) {
+  if(amount==null||isNaN(amount)) return <span style={style}>—</span>;
+  return <span style={style}>${Number(amount).toLocaleString("en-US",{minimumFractionDigits:0,maximumFractionDigits:0})}</span>;
+}
+function Btn({children,onClick,v="primary",style,disabled}) {
+  const styles = {
+    primary:{background:B.gold500,color:B.teal900,border:"none",fontWeight:800},
+    secondary:{background:"transparent",color:B.teal300,border:`1px solid ${B.teal600}`},
+    success:{background:B.approved,color:"#fff",border:"none"},
+    danger:{background:B.deniedBg,color:B.denied,border:`1px solid ${B.deniedBr}`},
+    small:{background:`${B.gold500}18`,color:B.gold500,border:`1px solid ${B.gold500}44`},
+  };
+  return <button onClick={onClick} disabled={disabled} style={{
+    ...styles[v],borderRadius:"4px",padding:"7px 14px",fontSize:"11px",fontWeight:700,
+    cursor:disabled?"not-allowed":"pointer",fontFamily:fontBody,opacity:disabled?0.5:1,
+    transition:"all 0.15s",letterSpacing:"0.3px",...style,
+  }}>{children}</button>;
+}
+function Badge({result,reason,variance,tier}) {
+  const ok = result==="APPROVED";
+  return (
+    <div style={{background:ok?B.approvedBg:B.deniedBg,border:`1px solid ${ok?B.approvedBr:B.deniedBr}`,borderRadius:"6px",padding:"10px 14px",marginBottom:"7px"}}>
+      <div style={{display:"flex",alignItems:"center",gap:"7px",marginBottom:reason?"4px":0}}>
+        <span style={{fontSize:"15px"}}>{ok?"✓":"✗"}</span>
+        <span style={{fontSize:"14px",fontWeight:800,color:ok?B.approved:B.denied,fontFamily:fontBody}}>{result} at {(tier*100).toFixed(0)}% AMI</span>
+      </div>
+      {reason&&<div style={{fontSize:"11px",color:B.gray300,marginLeft:"22px",fontFamily:fontBody}}>
+        {reason}{variance>0&&<span style={{color:B.denied,fontWeight:700}}> — Variance: <Mon amount={variance}/>{reason.includes("Exceeds")?" over limit":" annual shortfall"}</span>}
+      </div>}
+    </div>
+  );
+}
+
+// ============================================================
+// INCOME SECTIONS
+// ============================================================
+function PaystubSec({idx,data,onChange}) {
+  const stubs=data.paystubs||["","","",""],freq=data.paystubFrequency||"",annual=calcPaystub(stubs,freq);
+  return (
+    <Card style={{marginBottom:"8px"}}>
+      <div style={secCss}>Paystubs — Applicant {idx+1}{data.name&&<span style={{color:B.white,textTransform:"none",fontWeight:400,marginLeft:"6px",fontSize:"11px"}}>({data.name})</span>}</div>
+      <F label="Applicant Name"><I value={data.name||""} onChange={v=>onChange({...data,name:v})} placeholder="Full name"/></F>
+      <F label="Pay Frequency"><Sel value={freq} onChange={v=>onChange({...data,paystubFrequency:v})} options={PAY_FREQUENCIES.map(f=>f.label)} placeholder="Select frequency"/></F>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:"5px"}}>
+        {stubs.map((s,i)=><F key={i} label={`Stub ${i+1}`}><I type="number" value={s} onChange={v=>{const n=[...stubs];n[i]=v;onChange({...data,paystubs:n});}} placeholder="0.00"/></F>)}
+      </div>
+      <div style={{textAlign:"right",fontSize:"11px",color:B.teal300,fontFamily:fontBody}}>Annualized: <Mon amount={annual} style={{color:B.gold400,fontWeight:700}}/></div>
+    </Card>
+  );
+}
+function OfferSec({idx,data,onChange}) {
+  const annual=calcOffer(data.hourly,data.hoursPerWeek,data.salary);
+  return (
+    <Card style={{marginBottom:"8px"}}>
+      <div style={secCss}>Offer Letter — Applicant {idx+1}{data.name&&<span style={{color:B.white,textTransform:"none",fontWeight:400,marginLeft:"6px",fontSize:"11px"}}>({data.name})</span>}</div>
+      <F label="Applicant Name"><I value={data.name||""} onChange={v=>onChange({...data,name:v})} placeholder="Full name"/></F>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"6px"}}>
+        <F label="Hourly Pay"><I type="number" value={data.hourly||""} onChange={v=>onChange({...data,hourly:v})} placeholder="0.00"/></F>
+        <F label="Hours/Week"><I type="number" value={data.hoursPerWeek||""} onChange={v=>onChange({...data,hoursPerWeek:v})} placeholder="40"/></F>
+        <F label="Annual Salary (if salaried)"><I type="number" value={data.salary||""} onChange={v=>onChange({...data,salary:v})} placeholder="0"/></F>
+      </div>
+      <div style={{textAlign:"right",fontSize:"11px",color:B.teal300,fontFamily:fontBody}}>Annualized: <Mon amount={annual} style={{color:B.gold400,fontWeight:700}}/></div>
+    </Card>
+  );
+}
+function BankSec({idx,data,onChange}) {
+  const deps=data.deposits||["","",""],annual=calcBank(deps);
+  return (
+    <Card style={{marginBottom:"8px"}}>
+      <div style={secCss}>Bank Statements — Applicant {idx+1}{data.name&&<span style={{color:B.white,textTransform:"none",fontWeight:400,marginLeft:"6px",fontSize:"11px"}}>({data.name})</span>}</div>
+      <F label="Applicant Name"><I value={data.name||""} onChange={v=>onChange({...data,name:v})} placeholder="Full name"/></F>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"6px"}}>
+        {deps.map((d,i)=><F key={i} label={`Statement ${i+1} Deposits`}><I type="number" value={d} onChange={v=>{const n=[...deps];n[i]=v;onChange({...data,deposits:n});}} placeholder="0.00"/></F>)}
+      </div>
+      <div style={{textAlign:"right",fontSize:"11px",color:B.teal300,fontFamily:fontBody}}>Annualized: <Mon amount={annual} style={{color:B.gold400,fontWeight:700}}/></div>
+    </Card>
+  );
+}
+function OtherSec({items,onChange}) {
+  const annual=calcOther(items);
+  return (
+    <Card style={{marginBottom:"8px"}}>
+      <div style={{...secCss,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <span>Other Income Sources</span>
+        <Btn v="small" onClick={()=>onChange([...items,{type:"",receiver:"",amount:"",frequency:"",notes:""}])} style={{padding:"2px 8px",fontSize:"10px"}}>+ Add</Btn>
+      </div>
+      {items.map((item,i)=>(
+        <div key={i} style={{display:"grid",gridTemplateColumns:"130px 1fr 90px 110px 1fr 24px",gap:"5px",alignItems:"end",marginBottom:"5px"}}>
+          <F label={i===0?"Type":""}><Sel value={item.type} onChange={v=>{const n=[...items];n[i]={...n[i],type:v};onChange(n);}} options={OTHER_INCOME_TYPES} placeholder="—"/></F>
+          <F label={i===0?"Receiver":""}><I value={item.receiver} onChange={v=>{const n=[...items];n[i]={...n[i],receiver:v};onChange(n);}} placeholder="Name"/></F>
+          <F label={i===0?"Amount":""}><I type="number" value={item.amount} onChange={v=>{const n=[...items];n[i]={...n[i],amount:v};onChange(n);}} placeholder="0"/></F>
+          <F label={i===0?"Frequency":""}><Sel value={item.frequency} onChange={v=>{const n=[...items];n[i]={...n[i],frequency:v};onChange(n);}} options={OTHER_INCOME_FREQUENCIES.map(f=>f.label)} placeholder="—"/></F>
+          <F label={i===0?"Notes":""}><I value={item.notes} onChange={v=>{const n=[...items];n[i]={...n[i],notes:v};onChange(n);}} placeholder="Optional"/></F>
+          <button onClick={()=>onChange(items.filter((_,idx)=>idx!==i))} style={{background:"transparent",border:"none",color:B.denied,cursor:"pointer",fontSize:"15px",padding:"7px 2px",marginBottom:"8px"}}>×</button>
+        </div>
+      ))}
+      <div style={{textAlign:"right",fontSize:"11px",color:B.teal300,fontFamily:fontBody}}>Annualized: <Mon amount={annual} style={{color:B.gold400,fontWeight:700}}/></div>
+    </Card>
+  );
+}
+
+// ============================================================
+// HISTORY PANEL
+// ============================================================
+function HistoryPanel({history,loading}) {
+  if(loading) return <Card><div style={{textAlign:"center",color:B.teal300,padding:"20px",fontSize:"12px"}}>Loading history...</div></Card>;
+  if(!history?.length) return <Card><div style={{textAlign:"center",color:B.gray400,padding:"20px",fontSize:"12px"}}>No verifications submitted yet.</div></Card>;
+  return (
+    <Card style={{maxHeight:"400px",overflowY:"auto"}}>
+      <div style={secCss}>Recent Verifications ({history.length})</div>
+      <table style={{width:"100%",borderCollapse:"collapse",fontSize:"11px"}}>
+        <thead><tr style={{borderBottom:`1px solid ${B.teal600}`}}>
+          {["Date","Reviewer","Property","Unit","Applicant","BR","AMI","Income","Limit","Result"].map(h=>
+            <th key={h} style={{padding:"5px 4px",textAlign:"left",color:B.teal300,fontWeight:700,fontSize:"9px",textTransform:"uppercase",letterSpacing:"0.5px"}}>{h}</th>
+          )}
+        </tr></thead>
+        <tbody>{history.map((r,i)=>{
+          const ok=r.Result==="Approved",altOk=r.AltResult==="Approved";
+          return (
+            <tr key={i} style={{borderBottom:`1px solid ${B.teal600}22`,background:i%2===0?"transparent":`${B.teal700}66`}}>
+              <td style={{padding:"5px 4px",color:B.teal300,fontFamily:fontMono,fontSize:"10px"}}>{r.DateCompleted?new Date(r.DateCompleted).toLocaleDateString("en-US",{month:"short",day:"numeric"}):"—"}</td>
+              <td style={{padding:"5px 4px",color:B.white}}>{r.Reviewer||"—"}</td>
+              <td style={{padding:"5px 4px",color:B.white}}>{r.Property||"—"}</td>
+              <td style={{padding:"5px 4px",color:B.teal300,fontFamily:fontMono}}>{r.UnitAddress||"—"}</td>
+              <td style={{padding:"5px 4px",color:B.white}}>{r.ApplicantName||"—"}</td>
+              <td style={{padding:"5px 4px",color:B.teal300,textAlign:"center"}}>{r.Bedrooms??"—"}</td>
+              <td style={{padding:"5px 4px",color:B.teal300,textAlign:"center"}}>{r.AMITier?`${(Number(r.AMITier)*100).toFixed(0)}%`:"—"}</td>
+              <td style={{padding:"5px 4px",fontFamily:fontMono,textAlign:"right",color:B.white}}>{r.TotalIncome?`$${Number(r.TotalIncome).toLocaleString()}`:"—"}</td>
+              <td style={{padding:"5px 4px",fontFamily:fontMono,textAlign:"right",color:B.teal300}}>{r.IncomeLimit?`$${Number(r.IncomeLimit).toLocaleString()}`:"—"}</td>
+              <td style={{padding:"5px 4px"}}><span style={{
+                display:"inline-block",padding:"1px 6px",borderRadius:"3px",fontSize:"10px",fontWeight:700,
+                background:ok?B.approvedBg:altOk?B.warnBg:B.deniedBg,color:ok?B.approved:altOk?B.gold500:B.denied,
+                border:`1px solid ${ok?B.approvedBr:altOk?B.warnBr:B.deniedBr}`,
+              }}>{ok?"OK":altOk?"ALT OK":"DENIED"}</span></td>
+            </tr>
+          );
+        })}</tbody>
+      </table>
+    </Card>
+  );
+}
+
+// ============================================================
+// ADMIN PANEL
+// ============================================================
+function AdminPanel({ incomeLimits, properties, onSave, saving, lastSaved }) {
+  const [adminTab, setAdminTab] = useState("limits");
+  const [limitsEdit, setLimitsEdit] = useState(JSON.parse(JSON.stringify(incomeLimits)));
+  const [propsEdit, setPropsEdit] = useState(JSON.parse(JSON.stringify(properties)));
+  const [dirty, setDirty] = useState(false);
+
+  // Sync edits when external data changes (e.g. after save/load)
+  useEffect(() => { setLimitsEdit(JSON.parse(JSON.stringify(incomeLimits))); }, [incomeLimits]);
+  useEffect(() => { setPropsEdit(JSON.parse(JSON.stringify(properties))); }, [properties]);
+
+  const markDirty = () => setDirty(true);
+
+  const handleSave = () => {
+    onSave(limitsEdit, propsEdit);
+    setDirty(false);
+  };
+
+  // Income limit cell editor
+  const updateLimit = (ti, pi, val) => {
+    const next = {...limitsEdit, limits: limitsEdit.limits.map((row,i) => i===ti ? row.map((c,j) => j===pi ? (val===""?0:Number(val)) : c) : [...row])};
+    setLimitsEdit(next); markDirty();
+  };
+
+  // Property editors
+  const updatePropName = (pi, name) => { const n=[...propsEdit]; n[pi]={...n[pi],name}; setPropsEdit(n); markDirty(); };
+  const updateUnit = (pi, ui, field, val) => {
+    const n=JSON.parse(JSON.stringify(propsEdit));
+    n[pi].units[ui][field] = val===""?0:Number(val);
+    setPropsEdit(n); markDirty();
+  };
+  const updateUnitAmi = (pi, ui, val) => {
+    const n=JSON.parse(JSON.stringify(propsEdit));
+    n[pi].units[ui].ami = val===""?0:Number(val);
+    setPropsEdit(n); markDirty();
+  };
+  const addUnit = (pi) => {
+    const n=JSON.parse(JSON.stringify(propsEdit));
+    n[pi].units.push({bedrooms:1,ami:0.6,maxRent:0,marketRent:0,count:1});
+    setPropsEdit(n); markDirty();
+  };
+  const removeUnit = (pi,ui) => {
+    const n=JSON.parse(JSON.stringify(propsEdit));
+    n[pi].units = n[pi].units.filter((_,i)=>i!==ui);
+    setPropsEdit(n); markDirty();
+  };
+  const addProperty = () => {
+    setPropsEdit([...propsEdit, {name:"New Property",units:[{bedrooms:1,ami:0.6,maxRent:0,marketRent:0,count:1}]}]);
+    markDirty();
+  };
+  const removeProperty = (pi) => {
+    if (!confirm(`Remove "${propsEdit[pi].name}" and all its units?`)) return;
+    setPropsEdit(propsEdit.filter((_,i)=>i!==pi)); markDirty();
+  };
+
+  return (
+    <div>
+      {/* Admin sub-tabs */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"12px"}}>
+        <div style={{display:"flex",background:B.teal900,borderRadius:"4px",border:`1px solid ${B.teal600}`}}>
+          {[{key:"limits",label:"Income Limits"},{key:"properties",label:"Properties & Units"}].map(t=>
+            <button key={t.key} onClick={()=>setAdminTab(t.key)} style={{
+              background:adminTab===t.key?`${B.gold500}18`:"transparent",border:"none",
+              color:adminTab===t.key?B.gold500:B.teal300,padding:"6px 14px",fontSize:"11px",
+              fontWeight:700,cursor:"pointer",borderRadius:"3px",fontFamily:fontBody,
+              textTransform:"uppercase",letterSpacing:"0.5px",
+            }}>{t.label}</button>
+          )}
+        </div>
+        <div style={{display:"flex",gap:"8px",alignItems:"center"}}>
+          {lastSaved && <span style={{fontSize:"10px",color:B.teal300}}>Last saved: {lastSaved}</span>}
+          {dirty && <span style={{fontSize:"10px",color:B.gold500,fontWeight:700}}>● Unsaved changes</span>}
+          <Btn onClick={handleSave} disabled={!dirty||saving} style={{padding:"6px 16px"}}>
+            {saving?"Saving...":"Save Changes"}
+          </Btn>
+        </div>
+      </div>
+
+      {adminTab === "limits" && (
+        <Card>
+          <div style={secCss}>HUD Income Limits</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 120px",gap:"8px",marginBottom:"14px"}}>
+            <F label="Label / Fiscal Year">
+              <I value={limitsEdit.label} onChange={v=>{setLimitsEdit({...limitsEdit,label:v});markDirty();}} placeholder="FY 2025 HUD Income Limits..."/>
+            </F>
+            <F label="Area Median Income">
+              <I type="number" value={limitsEdit.medianIncome} onChange={v=>{setLimitsEdit({...limitsEdit,medianIncome:v===""?0:Number(v)});markDirty();}} placeholder="82400"/>
+            </F>
+            <div/>
+          </div>
+
+          {/* Limits grid */}
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:"11px"}}>
+              <thead>
+                <tr style={{borderBottom:`2px solid ${B.gold500}`}}>
+                  <th style={{padding:"6px 8px",textAlign:"left",color:B.gold500,fontWeight:700,fontSize:"10px",fontFamily:fontBody}}>AMI Tier</th>
+                  {limitsEdit.personCounts.map(p=>
+                    <th key={p} style={{padding:"6px 4px",textAlign:"center",color:B.teal300,fontWeight:700,fontSize:"10px",fontFamily:fontBody}}>{p} Person{p>1?"s":""}</th>
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {limitsEdit.tiers.map((tier,ti)=>
+                  <tr key={ti} style={{borderBottom:`1px solid ${B.teal600}33`}}>
+                    <td style={{padding:"4px 8px",color:B.gold400,fontWeight:700,fontFamily:fontMono,fontSize:"12px"}}>{(tier*100).toFixed(0)}%</td>
+                    {limitsEdit.personCounts.map((_,pi)=>
+                      <td key={pi} style={{padding:"2px 3px"}}>
+                        <input type="number" value={limitsEdit.limits[ti][pi]} onChange={e=>updateLimit(ti,pi,e.target.value)}
+                          style={{...inputCss,width:"80px",textAlign:"right",fontSize:"11px",padding:"4px 6px"}}/>
+                      </td>
+                    )}
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div style={{marginTop:"10px",fontSize:"10px",color:B.teal300,fontFamily:fontBody}}>
+            These are the maximum gross annual income limits by household size and AMI tier. Update when HUD publishes new limits (usually June each year).
+          </div>
+        </Card>
+      )}
+
+      {adminTab === "properties" && (
+        <div>
+          {propsEdit.map((prop,pi)=>(
+            <Card key={pi} style={{marginBottom:"10px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"8px"}}>
+                <div style={{flex:1,marginRight:"10px"}}>
+                  <I value={prop.name} onChange={v=>updatePropName(pi,v)} style={{fontSize:"14px",fontWeight:700,fontFamily:fontBody}} />
+                </div>
+                <div style={{display:"flex",gap:"4px"}}>
+                  <Btn v="small" onClick={()=>addUnit(pi)} style={{padding:"3px 8px",fontSize:"10px"}}>+ Unit Config</Btn>
+                  <Btn v="danger" onClick={()=>removeProperty(pi)} style={{padding:"3px 8px",fontSize:"10px"}}>Remove Property</Btn>
+                </div>
+              </div>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:"11px"}}>
+                <thead>
+                  <tr style={{borderBottom:`1px solid ${B.teal600}`}}>
+                    {["BR","AMI %","Max AMI Rent","Market Rent","Unit Count",""].map((h,i)=>
+                      <th key={i} style={{padding:"4px 6px",textAlign:i>1?"center":"left",color:B.teal300,fontWeight:700,fontSize:"9px",textTransform:"uppercase"}}>{h}</th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {prop.units.map((unit,ui)=>
+                    <tr key={ui} style={{borderBottom:`1px solid ${B.teal600}22`}}>
+                      <td style={{padding:"3px 4px",width:"60px"}}>
+                        <input type="number" value={unit.bedrooms} onChange={e=>updateUnit(pi,ui,"bedrooms",e.target.value)}
+                          style={{...inputCss,width:"50px",textAlign:"center",padding:"4px",fontSize:"11px"}}/>
+                      </td>
+                      <td style={{padding:"3px 4px",width:"80px"}}>
+                        <select value={unit.ami} onChange={e=>updateUnitAmi(pi,ui,e.target.value)}
+                          style={{...inputCss,width:"70px",padding:"4px",fontSize:"11px",cursor:"pointer"}}>
+                          {[0.3,0.5,0.6,0.8,1.0].map(t=><option key={t} value={t}>{(t*100).toFixed(0)}%</option>)}
+                        </select>
+                      </td>
+                      <td style={{padding:"3px 4px",width:"100px"}}>
+                        <input type="number" value={unit.maxRent} onChange={e=>updateUnit(pi,ui,"maxRent",e.target.value)}
+                          style={{...inputCss,width:"90px",textAlign:"right",padding:"4px 6px",fontSize:"11px"}}/>
+                      </td>
+                      <td style={{padding:"3px 4px",width:"100px"}}>
+                        <input type="number" value={unit.marketRent} onChange={e=>updateUnit(pi,ui,"marketRent",e.target.value)}
+                          style={{...inputCss,width:"90px",textAlign:"right",padding:"4px 6px",fontSize:"11px"}}/>
+                      </td>
+                      <td style={{padding:"3px 4px",width:"70px"}}>
+                        <input type="number" value={unit.count} onChange={e=>updateUnit(pi,ui,"count",e.target.value)}
+                          style={{...inputCss,width:"55px",textAlign:"center",padding:"4px",fontSize:"11px"}}/>
+                      </td>
+                      <td style={{padding:"3px 4px",width:"30px",textAlign:"center"}}>
+                        <button onClick={()=>removeUnit(pi,ui)} style={{background:"transparent",border:"none",color:B.denied,cursor:"pointer",fontSize:"14px"}}>×</button>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </Card>
+          ))}
+          <Btn v="small" onClick={addProperty} style={{marginTop:"4px"}}>+ Add Property</Btn>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// PRINTABLE RESULT
+// ============================================================
+function PrintResult({fd,pr,ar,total,breakdown,reviewer,limitsLabel}) {
+  const now=new Date(),ds=now.toLocaleDateString("en-US",{year:"numeric",month:"long",day:"numeric"});
+  return (
+    <div id="printable-result" style={{background:"#fff",color:"#1a2a30",padding:"28px",borderRadius:"6px",fontFamily:"'Source Sans 3','Segoe UI',sans-serif",fontSize:"12.5px",lineHeight:"1.5",border:`1px solid ${B.teal600}`,marginTop:"14px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"18px",borderBottom:`3px solid ${B.teal700}`,paddingBottom:"10px"}}>
+        <div>
+          <div style={{fontSize:"10px",fontWeight:700,color:B.gold500,textTransform:"uppercase",letterSpacing:"1.5px"}}>NewShire Property Management</div>
+          <div style={{fontSize:"17px",fontWeight:800,color:B.teal700,marginTop:"2px"}}>AMI Income Verification Result</div>
+          {fd.primaryApplicant&&<div style={{fontSize:"14px",fontWeight:700,color:B.dark,marginTop:"3px"}}>{fd.primaryApplicant}{fd.allApplicantNames!==fd.primaryApplicant&&<span style={{fontSize:"11px",fontWeight:400,color:B.gray400,marginLeft:"6px"}}>+ {fd.allApplicantNames.split(", ").length-1} co-applicant{fd.allApplicantNames.split(", ").length-1>1?"s":""}</span>}</div>}
+        </div>
+        <div style={{textAlign:"right",fontSize:"11px",color:B.gray400}}>
+          <div>{ds}</div><div>Reviewer: {reviewer||"—"}</div>
+          <div style={{fontFamily:fontMono,fontSize:"10px",color:B.gray300}}>ID: AMI-{now.getFullYear()}-{String(now.getMonth()+1).padStart(2,'0')}{String(now.getDate()).padStart(2,'0')}-{String(Math.floor(Math.random()*9000)+1000)}</div>
+        </div>
+      </div>
+      <table style={{width:"100%",borderCollapse:"collapse",marginBottom:"14px",fontSize:"11.5px"}}>
+        <tbody>{[["Applicant",fd.allApplicantNames||"—"],["Property",fd.propertyName],["Unit",fd.unitNumber],["Bedrooms",fd.bedrooms],["AMI",`${(fd.amiTier*100).toFixed(0)}%`],["Occupants",fd.occupants],["Anchor (HUD 1.5x)",pr.anchor],["Effective Persons",pr.eff],["Monthly Rent",`$${Number(fd.monthlyRent).toLocaleString()}`]].map(([l,v],i)=>
+          <tr key={i} style={{borderBottom:"1px solid #E8EAEA"}}><td style={{padding:"4px 6px",fontWeight:600,width:"50%",color:B.teal700}}>{l}</td><td style={{padding:"4px 6px"}}>{v}</td></tr>
+        )}</tbody>
+      </table>
+      <div style={{fontWeight:700,fontSize:"12px",marginBottom:"5px",borderBottom:`1px solid ${B.teal200}`,paddingBottom:"3px",color:B.teal700}}>Income Summary</div>
+      <table style={{width:"100%",borderCollapse:"collapse",marginBottom:"14px",fontSize:"11.5px"}}>
+        <tbody>{breakdown.filter(b=>b.amount>0).map((b,i)=>
+          <tr key={i} style={{borderBottom:"1px solid #E8EAEA"}}><td style={{padding:"3px 6px",color:B.gray500}}>{b.label}</td><td style={{padding:"3px 6px",textAlign:"right",fontFamily:fontMono}}>${Number(b.amount).toLocaleString("en-US",{minimumFractionDigits:2})}</td></tr>
+        )}
+        <tr style={{borderTop:`2px solid ${B.teal700}`,fontWeight:700}}><td style={{padding:"5px 6px",color:B.teal700}}>Total Gross Annual Income</td><td style={{padding:"5px 6px",textAlign:"right",fontFamily:fontMono}}>${Number(total).toLocaleString("en-US",{minimumFractionDigits:2})}</td></tr>
+        </tbody>
+      </table>
+      {[{r:pr,l:`${(fd.amiTier*100).toFixed(0)}% AMI`},...(ar?[{r:ar,l:"80% AMI (Alt Review)"}]:[])].map(({r,l},i)=>
+        <div key={i} style={{padding:"10px 14px",borderRadius:"5px",marginBottom:"8px",border:`2px solid ${r.result==="APPROVED"?"#22863A":"#CB2431"}`,background:r.result==="APPROVED"?"#F0FFF4":"#FFF5F5"}}>
+          <div style={{fontWeight:800,fontSize:"14px",color:r.result==="APPROVED"?"#22863A":"#CB2431"}}>{r.result==="APPROVED"?"✓ APPROVED":"✗ DENIED"} at {l}</div>
+          <div style={{fontSize:"11px",color:"#555",marginTop:"3px"}}>Income Limit: ${Number(r.limit).toLocaleString()} ({r.eff}-person)
+            {r.reason&&<span style={{display:"block",color:"#CB2431",marginTop:"2px"}}>{r.reason}{r.variance>0&&` — Variance: $${Number(r.variance).toLocaleString("en-US",{maximumFractionDigits:0})}${r.reason.includes("Exceeds")?" over":" shortfall"}`}</span>}
+          </div>
+        </div>
+      )}
+      <div style={{fontSize:"10px",color:B.gray300,marginTop:"10px",borderTop:`1px solid ${B.gray100}`,paddingTop:"6px"}}>
+        Min monthly (2.5x): ${Number(pr.minMo).toLocaleString("en-US",{minimumFractionDigits:2})} | Monthly income: ${Number(pr.mo).toLocaleString("en-US",{minimumFractionDigits:2})} | Rent ratio: {pr.mo>0?((Number(fd.monthlyRent)/pr.mo)*100).toFixed(1):"N/A"}%
+      </div>
+      <div style={{fontSize:"9px",color:B.gray300,marginTop:"14px",textAlign:"center"}}>NewShire Property Management • AMI Verification Calculator • {ds} • {limitsLabel}</div>
+    </div>
+  );
+}
+
+// ============================================================
+// SETUP BANNER
+// ============================================================
+function SetupBanner() {
+  const [open,setOpen]=useState(false);
+  return (
+    <div style={{background:B.warnBg,border:`1px solid ${B.warnBr}`,borderRadius:"6px",padding:"10px 14px",marginBottom:"12px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <span style={{color:B.gold500,fontWeight:700,fontSize:"12px",fontFamily:fontBody}}>⚠ SharePoint Not Configured — Calculator works, audit logging + admin saves disabled.</span>
+        <Btn v="small" onClick={()=>setOpen(!open)} style={{fontSize:"10px",padding:"3px 10px"}}>{open?"Hide":"Setup Guide"}</Btn>
+      </div>
+      {open&&<div style={{marginTop:"10px",fontSize:"11px",color:B.teal300,fontFamily:fontMono,lineHeight:"1.7"}}>
+        See the Word document setup guide for step-by-step instructions. You now also need a second SharePoint list called <b style={{color:B.gold400}}>"{CONFIG.configListName}"</b> with these columns: Title (text), IncomeLimitsJSON (multi-line text), PropertiesJSON (multi-line text), ModifiedByName (text). The admin panel will save/load config from this list.
+      </div>}
+    </div>
+  );
+}
+
+// ============================================================
+// HOUSE ICON
+// ============================================================
+function HouseIcon() {
+  return (
+    <svg width="28" height="24" viewBox="0 0 28 24" fill="none" style={{marginRight:"10px",flexShrink:0}}>
+      <path d="M14 1L2 11h3v11h7v-7h4v7h7V11h3L14 1z" stroke={B.gold500} strokeWidth="1.8" fill="none"/>
+      <rect x="11" y="8" width="3" height="3" rx="0.5" stroke={B.gold500} strokeWidth="1.2" fill="none"/>
+      <line x1="1" y1="13" x2="8" y2="13" stroke={B.gold500} strokeWidth="1.2"/>
+      <line x1="20" y1="13" x2="27" y2="13" stroke={B.gold500} strokeWidth="1.2"/>
+    </svg>
+  );
+}
+
+// ============================================================
+// MAIN COMPONENT
+// ============================================================
+window.AMICalculator = function AMICalculator() {
+  const [tab, setTab] = useState("calculator"); // calculator | history | admin
+  const auth = useMsal();
+
+  // Live config — loaded from SharePoint or defaults
+  const [incomeLimits, setIncomeLimits] = useState(DEFAULT_INCOME_LIMITS);
+  const [properties, setProperties] = useState(DEFAULT_PROPERTIES);
+  const [configLoaded, setConfigLoaded] = useState(false);
+  const [configLastSaved, setConfigLastSaved] = useState("");
+  const [adminSaving, setAdminSaving] = useState(false);
+
+  // Auth state
+  const isAdmin = auth.user ? CONFIG.adminEmails.includes(auth.user.username?.toLowerCase()) : false;
+
+  // Load config from SharePoint on mount
+  useEffect(() => {
+    if (!CONFIG.isConfigured) { setConfigLoaded(true); return; }
+    (async () => {
+      try {
+        const tok = await auth.getToken();
+        if (tok) {
+          const cfg = await loadConfig(tok);
+          if (cfg) {
+            setIncomeLimits(cfg.incomeLimits);
+            setProperties(cfg.properties);
+            setConfigLastSaved(`${new Date(cfg.lastModified).toLocaleDateString("en-US",{month:"short",day:"numeric"})} by ${cfg.modifiedBy}`);
+          }
+        }
+      } catch(e) { console.error("Config load error:",e); }
+      setConfigLoaded(true);
+    })();
+  }, [auth.status]);
+
+  // Admin save handler
+  const handleAdminSave = async (newLimits, newProps) => {
+    if (!CONFIG.isConfigured) { alert("SharePoint not configured. Changes applied locally only (will reset on reload)."); setIncomeLimits(newLimits); setProperties(newProps); return; }
+    setAdminSaving(true);
+    try {
+      const tok = await auth.getToken();
+      if (!tok) throw new Error("Auth failed");
+      await saveConfig(tok, newLimits, newProps, auth.user?.name || auth.user?.username || "Unknown");
+      setIncomeLimits(newLimits);
+      setProperties(newProps);
+      setConfigLastSaved(`Just now by ${auth.user?.name || "you"}`);
+    } catch(e) { alert(`Save failed: ${e.message}`); }
+    setAdminSaving(false);
+  };
+
+  // Calculator form state
+  const [reviewer,setReviewer]=useState("");
+  const [primaryApplicantName,setPrimaryApplicantName]=useState("");
+  const [propIdx,setPropIdx]=useState("");
+  const [unitCfg,setUnitCfg]=useState(null);
+  const [unitNum,setUnitNum]=useState("");
+  const [occ,setOcc]=useState("");
+  const [rent,setRent]=useState("");
+  const [applicants,setApplicants]=useState([{name:"",paystubs:["","","",""],paystubFrequency:""}]);
+  const [offers,setOffers]=useState([{name:"",hourly:"",hoursPerWeek:"",salary:""}]);
+  const [banks,setBanks]=useState([{name:"",deposits:["","",""]}]);
+  const [other,setOther]=useState([]);
+  const [notes,setNotes]=useState("");
+  const [submitSt,setSubmitSt]=useState("idle");
+  const [submitErr,setSubmitErr]=useState("");
+  const [history,setHistory]=useState([]);
+  const [histLoad,setHistLoad]=useState(false);
+
+  const prop = propIdx!=="" ? properties[propIdx] : null;
+  const units = prop ? [...new Map(prop.units.map(u=>[`${u.bedrooms}-${u.ami}`,u])).values()] : [];
+  const br = unitCfg?.bedrooms??0, ami = unitCfg?.ami??0;
+
+  const pAnn = applicants.reduce((s,a)=>s+calcPaystub(a.paystubs||[],a.paystubFrequency||""),0);
+  const oAnn = offers.reduce((s,o)=>s+calcOffer(o.hourly,o.hoursPerWeek,o.salary),0);
+  const bAnn = banks.reduce((s,b)=>s+calcBank(b.deposits||[]),0);
+  const otAnn = calcOther(other);
+  const total = pAnn+oAnn+bAnn+otAnn;
+  const breakdown = [{label:"Paystub Income",amount:pAnn},{label:"Offer Letter",amount:oAnn},{label:"Bank Statements",amount:bAnn},{label:"Other Income",amount:otAnn}];
+
+  const canRun = unitCfg && total>0 && rent;
+  let pr=null, ar=null;
+  if(canRun) {
+    const eff = occ?Number(occ):getAnchorPersons(br);
+    pr = runVerify({tier:ami,br,occ:eff,income:total,rent:Number(rent),lim:incomeLimits});
+    if(pr.result==="DENIED"&&ami<0.8) {
+      const au = prop.units.find(u=>u.bedrooms===br&&u.ami===0.8);
+      ar = runVerify({tier:0.8,br,occ:eff,income:total,rent:au?au.marketRent:Number(rent),lim:incomeLimits});
+    }
+  }
+
+  useEffect(()=>{
+    if(tab==="history"&&CONFIG.isConfigured){
+      (async()=>{setHistLoad(true);try{const t=await auth.getToken();if(t)setHistory(await fetchHistory(t));}catch(e){}setHistLoad(false);})();
+    }
+  },[tab]);
+
+  const handleSubmit = async () => {
+    if(!CONFIG.isConfigured){setSubmitErr("Not configured");setSubmitSt("error");return;}
+    if(!reviewer.trim()){setSubmitErr("Reviewer name required");setSubmitSt("error");return;}
+    setSubmitSt("submitting");
+    try {
+      const tok=await auth.getToken(); if(!tok) throw new Error("Auth failed");
+      await writeRecord(tok, {
+        Title:`${prop.name} - ${unitNum||"—"} - ${primaryApplicant||"Unknown"}`, DateCompleted:new Date().toISOString(),
+        Reviewer:reviewer, Property:prop.name, UnitAddress:unitNum, ApplicantName:allApplicantNames,
+        Bedrooms:br, AMITier:ami, Occupants:occ?Number(occ):getAnchorPersons(br),
+        IncomeLimit:pr.limit, TotalIncome:Math.round(total*100)/100, MonthlyRent:Number(rent),
+        Result:pr.result==="APPROVED"?"Approved":`Denied - ${pr.reason}`,
+        Variance:Math.round(pr.variance*100)/100, DenialReason:pr.reason||"",
+        AltAMITier:ar?0.8:null, AltIncomeLimit:ar?ar.limit:null,
+        AltResult:ar?(ar.result==="APPROVED"?"Approved":`Denied - ${ar.reason}`):"",
+        AltVariance:ar?Math.round(ar.variance*100)/100:null, AltDenialReason:ar?(ar.reason||""):"",
+        PaystubIncome:Math.round(pAnn*100)/100, OfferLetterIncome:Math.round(oAnn*100)/100,
+        BankStatementIncome:Math.round(bAnn*100)/100, OtherIncome:Math.round(otAnn*100)/100,
+        EffectivePersons:pr.eff, AnchorPersons:pr.anchor, VerificationNotes:notes,
+      });
+      setSubmitSt("success"); setTimeout(()=>setSubmitSt("idle"),4000);
+    } catch(e){setSubmitErr(e.message);setSubmitSt("error");}
+  };
+
+  const reset = () => {
+    setPropIdx("");setUnitCfg(null);setUnitNum("");setOcc("");setRent("");setPrimaryApplicantName("");
+    setApplicants([{name:"",paystubs:["","","",""],paystubFrequency:""}]);
+    setOffers([{name:"",hourly:"",hoursPerWeek:"",salary:""}]);
+    setBanks([{name:"",deposits:["","",""]}]);
+    setOther([]);setNotes("");setSubmitSt("idle");setSubmitErr("");
+  };
+
+  const handlePrint = () => {
+    const el=document.getElementById("printable-result");if(!el)return;
+    const w=window.open("","_blank");
+    w.document.write(`<html><head><title>AMI Verification</title><link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800&family=Source+Code+Pro:wght@400;600&display=swap" rel="stylesheet"><style>body{margin:0;padding:20px;font-family:'Source Sans 3',sans-serif;} @media print{body{padding:0;}}</style></head><body>${el.outerHTML}</body></html>`);
+    w.document.close();setTimeout(()=>w.print(),500);
+  };
+
+  const coApplicantNames = [...applicants,...offers,...banks].filter(a=>a.name).map(a=>a.name);
+  const primaryApplicant = primaryApplicantName.trim() || coApplicantNames[0] || "";
+  const allApplicantNames = [...new Set([primaryApplicant,...coApplicantNames].filter(Boolean))].join(", ");
+  const fd = {propertyName:prop?.name||"",unitNumber:unitNum,bedrooms:br,amiTier:ami,occupants:occ||getAnchorPersons(br),monthlyRent:rent,primaryApplicant,allApplicantNames};
+
+  // Loading state
+  if (!configLoaded) {
+    return (
+      <div style={{background:B.teal900,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:fontBody}}>
+        <div style={{textAlign:"center",color:B.teal300}}>
+          <div style={{fontSize:"14px",marginBottom:"6px"}}>Loading configuration...</div>
+          <div style={{fontSize:"11px",color:B.gray400}}>Connecting to SharePoint</div>
+        </div>
+      </div>
+    );
+  }
+
+  const tabs = [
+    {key:"calculator",label:"Calculator"},
+    {key:"history",label:"History"},
+    ...(isAdmin || !CONFIG.isConfigured ? [{key:"admin",label:"Admin"}] : []),
+  ];
+
+  return (
+    <div style={{background:`linear-gradient(180deg, ${B.teal900} 0%, ${B.teal800} 100%)`,minHeight:"100vh",color:B.white,fontFamily:fontBody}}>
+      <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700;800;900&family=Source+Code+Pro:wght@400;500;600&display=swap" rel="stylesheet"/>
+
+      {/* HEADER */}
+      <div style={{background:B.teal700,borderBottom:`2px solid ${B.gold500}`,padding:"12px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{display:"flex",alignItems:"center"}}>
+          <HouseIcon/>
+          <div>
+            <div style={{fontSize:"10px",fontWeight:700,color:B.gold500,textTransform:"uppercase",letterSpacing:"2px"}}>NewShire Property Management</div>
+            <div style={{fontSize:"18px",fontWeight:900,color:B.white,letterSpacing:"-0.2px",lineHeight:"1.1"}}>AMI Verification Calculator</div>
+            <div style={{fontSize:"10px",color:B.teal300,marginTop:"1px"}}>{incomeLimits.label}</div>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:"6px",alignItems:"center"}}>
+          <div style={{display:"flex",background:B.teal900,borderRadius:"4px",border:`1px solid ${B.teal600}`,marginRight:"8px"}}>
+            {tabs.map(t=>
+              <button key={t.key} onClick={()=>setTab(t.key)} style={{
+                background:tab===t.key?`${B.gold500}18`:"transparent",border:"none",
+                color:tab===t.key?B.gold500:B.teal300,padding:"5px 12px",fontSize:"11px",
+                fontWeight:700,cursor:"pointer",borderRadius:"3px",fontFamily:fontBody,
+                textTransform:"uppercase",letterSpacing:"0.5px",
+                ...(t.key==="admin"?{borderLeft:`1px solid ${B.teal600}`}:{}),
+              }}>{t.key==="admin"?"⚙ Admin":t.label}</button>
+            )}
+          </div>
+          {canRun&&pr&&tab==="calculator"&&<Btn onClick={handlePrint}>Print Result</Btn>}
+          {tab==="calculator"&&<Btn v="secondary" onClick={reset}>Reset</Btn>}
+        </div>
+      </div>
+
+      <div style={{padding:"16px 20px",maxWidth:"1200px"}}>
+        {!CONFIG.isConfigured&&<SetupBanner/>}
+
+        {/* ═══ ADMIN TAB ═══ */}
+        {tab==="admin" && (
+          (!isAdmin && CONFIG.isConfigured) ? (
+            <Card><div style={{textAlign:"center",padding:"40px",color:B.teal300}}>
+              <div style={{fontSize:"24px",marginBottom:"8px"}}>🔒</div>
+              <div style={{fontSize:"14px",fontWeight:700,marginBottom:"4px"}}>Admin Access Required</div>
+              <div style={{fontSize:"12px",color:B.gray400}}>Your account ({auth.user?.username}) is not in the admin list. Contact your administrator to request access.</div>
+            </div></Card>
+          ) : (
+            <AdminPanel incomeLimits={incomeLimits} properties={properties} onSave={handleAdminSave} saving={adminSaving} lastSaved={configLastSaved}/>
+          )
+        )}
+
+        {/* ═══ HISTORY TAB ═══ */}
+        {tab==="history"&&<HistoryPanel history={history} loading={histLoad}/>}
+
+        {/* ═══ CALCULATOR TAB ═══ */}
+        {tab==="calculator"&&(
+          <>
+            <Card style={{marginBottom:"12px"}}>
+              <div style={secCss}>Property & Unit Information</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1.2fr 1.5fr 1fr 0.7fr 0.7fr 0.8fr",gap:"10px"}}>
+                <F label="Reviewer"><I value={reviewer} onChange={setReviewer} placeholder="Your name"/></F>
+                <F label="Primary Applicant"><I value={primaryApplicantName} onChange={setPrimaryApplicantName} placeholder="Applicant full name"/></F>
+                <F label="Property">
+                  <Sel value={propIdx} onChange={v=>{setPropIdx(v);setUnitCfg(null);setRent("");}} options={properties.map((p,i)=>({value:i,label:p.name}))} placeholder="Select property"/>
+                </F>
+                <F label="Unit Config">
+                  <Sel value={unitCfg?`${unitCfg.bedrooms}-${unitCfg.ami}`:""} onChange={v=>{const[b,a]=v.split("-").map(Number);const u=units.find(u=>u.bedrooms===b&&u.ami===a);setUnitCfg(u);if(u)setRent(String(u.marketRent));}}
+                    options={units.map(u=>({value:`${u.bedrooms}-${u.ami}`,label:`${u.bedrooms}BR / ${(u.ami*100).toFixed(0)}% AMI`}))} placeholder="Select"/>
+                </F>
+                <F label="Unit #"><I value={unitNum} onChange={setUnitNum} placeholder="e.g. 162"/></F>
+                <F label="Occupants"><I type="number" value={occ} onChange={setOcc} placeholder={unitCfg?String(getAnchorPersons(br)):"—"}/></F>
+                <F label="Monthly Rent"><I type="number" value={rent} onChange={setRent} placeholder="0"/></F>
+              </div>
+              {unitCfg&&(
+                <div style={{background:B.teal900,border:`1px solid ${B.teal600}`,borderRadius:"4px",padding:"6px 10px",marginTop:"8px",fontSize:"10px",color:B.teal300,fontFamily:fontMono,display:"flex",gap:"20px",flexWrap:"wrap"}}>
+                  <span>BR: <b style={{color:B.white}}>{br}</b></span>
+                  <span>Anchor: <b style={{color:B.gold400}}>{getAnchorPersons(br)}p</b></span>
+                  <span>Effective: <b style={{color:B.gold500}}>{getEffective(br,occ?Number(occ):0)}p</b></span>
+                  <span>AMI: <b style={{color:B.white}}>{(ami*100).toFixed(0)}%</b></span>
+                  <span>Limit: <b style={{color:B.approved}}><Mon amount={getLimit(ami,getEffective(br,occ?Number(occ):0),incomeLimits)}/></b></span>
+                </div>
+              )}
+            </Card>
+
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px",marginBottom:"12px"}}>
+              <div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"6px"}}>
+                  <span style={{fontSize:"10px",fontWeight:700,color:B.teal300,textTransform:"uppercase",letterSpacing:"0.5px"}}>Paystubs ({applicants.length} applicant{applicants.length>1?"s":""})</span>
+                  <div style={{display:"flex",gap:"4px"}}>
+                    {applicants.length<8&&<Btn v="small" onClick={()=>setApplicants([...applicants,{name:"",paystubs:["","","",""],paystubFrequency:""}])} style={{padding:"2px 6px",fontSize:"9px"}}>+ Applicant</Btn>}
+                    {applicants.length>1&&<Btn v="danger" onClick={()=>setApplicants(applicants.slice(0,-1))} style={{padding:"2px 6px",fontSize:"9px"}}>Remove</Btn>}
+                  </div>
+                </div>
+                {applicants.map((a,i)=><PaystubSec key={i} idx={i} data={a} onChange={d=>{const n=[...applicants];n[i]=d;setApplicants(n);}}/>)}
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"6px",marginTop:"10px"}}>
+                  <span style={{fontSize:"10px",fontWeight:700,color:B.teal300,textTransform:"uppercase",letterSpacing:"0.5px"}}>Offer Letters ({offers.length} applicant{offers.length>1?"s":""})</span>
+                  <div style={{display:"flex",gap:"4px"}}>
+                    {offers.length<8&&<Btn v="small" onClick={()=>setOffers([...offers,{name:"",hourly:"",hoursPerWeek:"",salary:""}])} style={{padding:"2px 6px",fontSize:"9px"}}>+ Applicant</Btn>}
+                    {offers.length>1&&<Btn v="danger" onClick={()=>setOffers(offers.slice(0,-1))} style={{padding:"2px 6px",fontSize:"9px"}}>Remove</Btn>}
+                  </div>
+                </div>
+                {offers.map((o,i)=><OfferSec key={i} idx={i} data={o} onChange={d=>{const n=[...offers];n[i]=d;setOffers(n);}}/>)}
+              </div>
+              <div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"6px"}}>
+                  <span style={{fontSize:"10px",fontWeight:700,color:B.teal300,textTransform:"uppercase",letterSpacing:"0.5px"}}>Bank Statements ({banks.length} applicant{banks.length>1?"s":""})</span>
+                  <div style={{display:"flex",gap:"4px"}}>
+                    {banks.length<8&&<Btn v="small" onClick={()=>setBanks([...banks,{name:"",deposits:["","",""]}])} style={{padding:"2px 6px",fontSize:"9px"}}>+ Applicant</Btn>}
+                    {banks.length>1&&<Btn v="danger" onClick={()=>setBanks(banks.slice(0,-1))} style={{padding:"2px 6px",fontSize:"9px"}}>Remove</Btn>}
+                  </div>
+                </div>
+                {banks.map((b,i)=><BankSec key={i} idx={i} data={b} onChange={d=>{const n=[...banks];n[i]=d;setBanks(n);}}/>)}
+                <OtherSec items={other} onChange={setOther}/>
+                <Card>
+                  <div style={secCss}>Income Summary</div>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:"11px"}}>
+                    <tbody>
+                      {breakdown.map((b,i)=><tr key={i} style={{borderBottom:`1px solid ${B.teal600}`}}>
+                        <td style={{padding:"5px 0",color:B.teal300}}>{b.label}</td>
+                        <td style={{padding:"5px 0",textAlign:"right",fontFamily:fontMono,color:b.amount>0?B.white:B.gray400}}><Mon amount={b.amount}/></td>
+                      </tr>)}
+                      <tr style={{borderTop:`2px solid ${B.gold500}`}}>
+                        <td style={{padding:"7px 0",fontWeight:800,color:B.white}}>Total Gross Annual</td>
+                        <td style={{padding:"7px 0",textAlign:"right",fontFamily:fontMono,fontWeight:800,fontSize:"14px",color:B.gold400}}><Mon amount={total}/></td>
+                      </tr>
+                      <tr><td style={{padding:"3px 0",color:B.gray400,fontSize:"10px"}}>Monthly Gross</td>
+                        <td style={{padding:"3px 0",textAlign:"right",fontFamily:fontMono,color:B.gray400,fontSize:"10px"}}><Mon amount={total/12}/></td></tr>
+                    </tbody>
+                  </table>
+                </Card>
+              </div>
+            </div>
+
+            {canRun&&pr&&(
+              <Card style={{marginBottom:"12px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div style={{...secCss,color:B.gold500,marginBottom:0,borderBottom:"none",paddingBottom:0}}>Verification Decision</div>
+                  <div style={{display:"flex",gap:"6px",alignItems:"center"}}>
+                    {submitSt==="success"&&<span style={{fontSize:"11px",color:B.approved,fontWeight:700}}>✓ Saved to SharePoint</span>}
+                    {submitSt==="error"&&<span style={{fontSize:"11px",color:B.denied,fontWeight:600}}>{submitErr}</span>}
+                    <Btn v="success" onClick={handleSubmit} disabled={submitSt==="submitting"} style={{padding:"7px 18px"}}>
+                      {submitSt==="submitting"?"Saving...":"Submit to Audit Log"}
+                    </Btn>
+                  </div>
+                </div>
+                <div style={{marginTop:"10px"}}>
+                  <Badge {...pr}/>
+                  {ar&&<><div style={{fontSize:"10px",color:B.teal300,margin:"6px 0 3px",textTransform:"uppercase",letterSpacing:"0.5px",fontWeight:700}}>Alt AMI Review (80%)</div><Badge {...ar}/></>}
+                  {pr.result==="DENIED"&&!ar&&ami===0.8&&<div style={{background:B.deniedBg,border:`1px solid ${B.deniedBr}`,borderRadius:"5px",padding:"8px 12px",fontSize:"11px",color:B.denied,fontWeight:700,marginTop:"4px"}}>Already at 80% AMI — no higher tier. Applicant does not qualify.</div>}
+                </div>
+                <F label="Verification Notes (optional)" style={{marginTop:"10px"}}><I value={notes} onChange={setNotes} placeholder="Notes for audit record..."/></F>
+              </Card>
+            )}
+            {canRun&&pr&&<PrintResult fd={fd} pr={pr} ar={ar} total={total} breakdown={breakdown} reviewer={reviewer} limitsLabel={incomeLimits.label}/>}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(React.createElement(window.AMICalculator));
+</script>
+</body>
+</html>
