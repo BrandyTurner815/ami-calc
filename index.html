@@ -863,12 +863,6 @@ window.AMICalculator = function AMICalculator() {
     );
   }
 
-  const tabs = [
-    {key:"calculator",label:"Calculator"},
-    {key:"history",label:"History"},
-    ...(isAdmin || !CONFIG.isConfigured ? [{key:"admin",label:"Admin"}] : []),
-  ];
-
   return (
     <div style={{background:`linear-gradient(180deg, ${B.teal900} 0%, ${B.teal800} 100%)`,minHeight:"100vh",color:B.white,fontFamily:fontBody}}>
       <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700;800;900&family=Source+Code+Pro:wght@400;500;600&display=swap" rel="stylesheet"/>
@@ -885,7 +879,7 @@ window.AMICalculator = function AMICalculator() {
         </div>
         <div style={{display:"flex",gap:"6px",alignItems:"center"}}>
           <div style={{display:"flex",background:B.teal900,borderRadius:"4px",border:`1px solid ${B.teal600}`,marginRight:"8px"}}>
-            {tabs.map(t=>
+            {[{key:"calculator",label:"Calculator"},{key:"history",label:"History"},{key:"admin",label:"Admin"}].map(t=>
               <button key={t.key} onClick={()=>setTab(t.key)} style={{
                 background:tab===t.key?`${B.gold500}18`:"transparent",border:"none",
                 color:tab===t.key?B.gold500:B.teal300,padding:"5px 12px",fontSize:"11px",
@@ -897,6 +891,11 @@ window.AMICalculator = function AMICalculator() {
           </div>
           {canRun&&pr&&tab==="calculator"&&<Btn onClick={handlePrint}>Print Result</Btn>}
           {tab==="calculator"&&<Btn v="secondary" onClick={reset}>Reset</Btn>}
+          {auth.user ? (
+            <span style={{fontSize:"10px",color:B.teal300,marginLeft:"4px",fontFamily:fontBody}}>✓ {auth.user.name||auth.user.username}</span>
+          ) : CONFIG.isConfigured ? (
+            <Btn v="small" onClick={async()=>{await auth.getToken();}} style={{marginLeft:"4px",padding:"4px 10px",fontSize:"10px"}}>Sign In</Btn>
+          ) : null}
         </div>
       </div>
 
@@ -905,7 +904,14 @@ window.AMICalculator = function AMICalculator() {
 
         {/* ═══ ADMIN TAB ═══ */}
         {tab==="admin" && (
-          (!isAdmin && CONFIG.isConfigured) ? (
+          !auth.user && CONFIG.isConfigured ? (
+            <Card><div style={{textAlign:"center",padding:"40px",color:B.teal300}}>
+              <div style={{fontSize:"24px",marginBottom:"8px"}}>🔑</div>
+              <div style={{fontSize:"14px",fontWeight:700,marginBottom:"8px"}}>Sign In Required</div>
+              <div style={{fontSize:"12px",color:B.gray400,marginBottom:"14px"}}>Sign in with your Microsoft 365 account to access admin settings.</div>
+              <Btn onClick={async()=>{await auth.getToken();}}>Sign In with Microsoft</Btn>
+            </div></Card>
+          ) : (!isAdmin && CONFIG.isConfigured) ? (
             <Card><div style={{textAlign:"center",padding:"40px",color:B.teal300}}>
               <div style={{fontSize:"24px",marginBottom:"8px"}}>🔒</div>
               <div style={{fontSize:"14px",fontWeight:700,marginBottom:"4px"}}>Admin Access Required</div>
@@ -917,7 +923,16 @@ window.AMICalculator = function AMICalculator() {
         )}
 
         {/* ═══ HISTORY TAB ═══ */}
-        {tab==="history"&&<HistoryPanel history={history} loading={histLoad}/>}
+        {tab==="history"&&(
+          !auth.user && CONFIG.isConfigured ? (
+            <Card><div style={{textAlign:"center",padding:"40px",color:B.teal300}}>
+              <div style={{fontSize:"24px",marginBottom:"8px"}}>🔑</div>
+              <div style={{fontSize:"14px",fontWeight:700,marginBottom:"8px"}}>Sign In Required</div>
+              <div style={{fontSize:"12px",color:B.gray400,marginBottom:"14px"}}>Sign in with your Microsoft 365 account to view verification history.</div>
+              <Btn onClick={async()=>{await auth.getToken();}}>Sign In with Microsoft</Btn>
+            </div></Card>
+          ) : <HistoryPanel history={history} loading={histLoad}/>
+        )}
 
         {/* ═══ CALCULATOR TAB ═══ */}
         {tab==="calculator"&&(
