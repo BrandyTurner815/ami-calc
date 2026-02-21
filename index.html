@@ -458,7 +458,7 @@ window.AMICalculator = function AMICalculator(){
   const[counties,setCounties]=useState(DEFAULT_COUNTIES);
   const[properties,setProperties]=useState(DEFAULT_PROPERTIES);
   const[users,setUsers]=useState(DEFAULT_USERS);
-  const[cfgDone,setCfgDone]=useState(false);
+  const[cfgDone,setCfgDone]=useState(!CONFIG.isConfigured);
   const[cfgSaved,setCfgSaved]=useState("");
   const[adminSaving,setAdminSaving]=useState(false);
 
@@ -470,19 +470,23 @@ window.AMICalculator = function AMICalculator(){
   const isApprover=userRole==="approver"||isAdmin;
   const isManager=userRole==="manager"||isApprover;
 
-  // Load config
+  // Load config — runs once after first successful auth
+  const cfgLoadedRef=useRef(false);
   useEffect(()=>{
     if(!CONFIG.isConfigured){setCfgDone(true);return}
+    if(cfgLoadedRef.current)return;
+    if(!auth.user)return; // wait for sign-in
+    cfgLoadedRef.current=true;
     (async()=>{try{
       const tok=await auth.getToken();
       if(tok){const cfg=await cfgLoad(tok);if(cfg){
         if(cfg.counties?.counties){setCounties(cfg.counties.counties);if(cfg.counties.users)setUsers(cfg.counties.users)}
-        else if(cfg.counties&&!cfg.counties.counties){/* Legacy single-county format */setCounties({"Spartanburg County, SC":cfg.counties})}
+        else if(cfg.counties&&!cfg.counties.counties){setCounties({"Spartanburg County, SC":cfg.counties})}
         setProperties(cfg.properties);
         setCfgSaved(`${new Date(cfg.lastModified).toLocaleDateString("en-US",{month:"short",day:"numeric"})}`);
       }}
     }catch(e){console.error("Cfg load:",e)}setCfgDone(true)})();
-  },[auth.status]);
+  },[auth.user]);
 
   // Admin save
   const handleAdminSave=async(newC,newP,newU)=>{
@@ -543,10 +547,16 @@ window.AMICalculator = function AMICalculator(){
   }
 
   // History load
+  const histLoadedRef=useRef(false);
   useEffect(()=>{
     if(tab==="history"&&CONFIG.isConfigured&&auth.user){
-      (async()=>{setHistLoad(true);try{const t=await auth.getToken();if(t)setHistory(await spHistory(t))}catch(e){}setHistLoad(false)})();
+      histLoadedRef.current=false; // allow reload when switching to tab
     }
+  },[tab]);
+  useEffect(()=>{
+    if(tab!=="history"||!CONFIG.isConfigured||!auth.user||histLoadedRef.current)return;
+    histLoadedRef.current=true;
+    (async()=>{setHistLoad(true);try{const t=await auth.getToken();if(t)setHistory(await spHistory(t))}catch(e){console.error("History:",e)}setHistLoad(false)})();
   },[tab,auth.user]);
 
   // Load history record into form
@@ -658,7 +668,7 @@ window.AMICalculator = function AMICalculator(){
   const firstCounty=Object.values(counties)[0];
   const headerLabel=Object.keys(counties).length===1?firstCounty?.label:`${Object.keys(counties).length} Coverage Areas`;
 
-  if(!cfgDone)return(<div style={{background:B.teal900,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:fb}}><div style={{textAlign:"center",color:B.teal300}}><div style={{fontSize:"14px",marginBottom:"6px"}}>Loading configuration...</div><div style={{fontSize:"11px",color:B.gray400}}>Connecting to SharePoint</div></div></div>);
+  if(!cfgDone&&auth.user)return(<div style={{background:B.teal900,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:fb}}><div style={{textAlign:"center",color:B.teal300}}><div style={{fontSize:"14px",marginBottom:"6px"}}>Loading configuration...</div><div style={{fontSize:"11px",color:B.gray400}}>Connecting to SharePoint</div></div></div>);
 
   return(
     <div style={{background:`linear-gradient(180deg,${B.teal900} 0%,${B.teal800} 100%)`,minHeight:"100vh",color:B.white,fontFamily:fb}}>
