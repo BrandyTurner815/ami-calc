@@ -226,6 +226,164 @@ function HistoryPanel({history,loading,onSelect,userRole}){
   );
 }
 
+
+// ============================================================
+// DASHBOARD — Performance metrics computed from history data
+// ============================================================
+function Dashboard({history,properties}){
+  if(!history?.length)return<Card><div style={{textAlign:"center",color:B.gray400,padding:"20px",fontSize:"12px"}}>No verification data available for dashboard. Submit verifications to see metrics.</div></Card>;
+
+  // Compute metrics
+  const total=history.length;
+  const approvedInit=history.filter(r=>r.Result==="Approved").length;
+  const deniedInit=history.filter(r=>r.Result&&r.Result.startsWith("Denied")).length;
+  const overrides=history.filter(r=>r.Result?.includes("Override")).length;
+  const approvalRateInit=total?approvedInit/total:0;
+  const recoveredAlt=history.filter(r=>r.AltResult==="Approved").length;
+  const finalApproved=approvedInit+recoveredAlt+overrides;
+  const finalRate=total?finalApproved/total:0;
+  const deniedOver=history.filter(r=>r.DenialReason?.includes("Exceeds")).length;
+  const deniedBelow=history.filter(r=>r.DenialReason?.includes("Below")).length;
+
+  // By property
+  const propNames=[...new Set(history.map(r=>r.Property).filter(Boolean))];
+  const byProp=propNames.map(name=>{
+    const recs=history.filter(r=>r.Property===name);
+    const app=recs.filter(r=>r.Result==="Approved").length;
+    const recov=recs.filter(r=>r.AltResult==="Approved").length;
+    const ovr=recs.filter(r=>r.Result?.includes("Override")).length;
+    const fin=app+recov+ovr;
+    return{name,total:recs.length,approved:app,recovered:recov,overrides:ovr,denied:recs.length-fin,rate:recs.length?fin/recs.length:0};
+  }).sort((a,b)=>b.total-a.total);
+
+  // By AMI tier
+  const tiers=[...new Set(history.map(r=>r.AMITier).filter(Boolean))].sort();
+  const byTier=tiers.map(tier=>{
+    const recs=history.filter(r=>r.AMITier===tier||+r.AMITier===+tier);
+    const app=recs.filter(r=>r.Result==="Approved").length;
+    const over=recs.filter(r=>r.DenialReason?.includes("Exceeds")).length;
+    const below=recs.filter(r=>r.DenialReason?.includes("Below")).length;
+    return{tier:+tier,total:recs.length,approved:app,rate:recs.length?app/recs.length:0,overIncome:over,belowMin:below};
+  });
+
+  // Alt AMI recovery
+  const sentToAlt=history.filter(r=>r.AltAMITier||r.AltResult).length;
+  const stillDenied=sentToAlt-recoveredAlt;
+
+  const pct=(v)=>`${(v*100).toFixed(1)}%`;
+  const kpiBox=(label,value,sub,clr)=>(<div style={{background:B.teal900,border:`1px solid ${B.teal600}`,borderRadius:"6px",padding:"12px 14px",textAlign:"center",flex:1,minWidth:"120px"}}>
+    <div style={{fontSize:"22px",fontWeight:900,color:clr||B.gold400,fontFamily:fm}}>{value}</div>
+    <div style={{fontSize:"10px",fontWeight:700,color:B.teal300,textTransform:"uppercase",letterSpacing:"0.5px",marginTop:"2px"}}>{label}</div>
+    {sub&&<div style={{fontSize:"9px",color:B.gray400,marginTop:"2px"}}>{sub}</div>}
+  </div>);
+  const tblHd=(text)=>({padding:"6px 8px",textAlign:"left",color:B.gold500,fontWeight:700,fontSize:"10px",fontFamily:fb,textTransform:"uppercase",borderBottom:`2px solid ${B.gold500}`});
+  const tblTd=(align)=>({padding:"5px 8px",borderBottom:`1px solid ${B.teal600}22`,fontSize:"11px",textAlign:align||"left"});
+
+  return(
+    <div>
+      {/* KPI ROW */}
+      <div style={{display:"flex",gap:"8px",marginBottom:"12px",flexWrap:"wrap"}}>
+        {kpiBox("Total Verifications",total)}
+        {kpiBox("Approved (Initial)",approvedInit,pct(approvalRateInit),B.ok)}
+        {kpiBox("Denied (Initial)",deniedInit,null,B.no)}
+        {kpiBox("Recovered at Alt AMI",recoveredAlt)}
+        {kpiBox("Overrides",overrides,null,B.ov)}
+        {kpiBox("Final Approval Rate",pct(finalRate),`${finalApproved} of ${total}`,finalRate>=0.6?B.ok:B.no)}
+        {kpiBox("Denied: Over Income",deniedOver,null,B.no)}
+        {kpiBox("Denied: Below Min",deniedBelow,null,B.no)}
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px",marginBottom:"12px"}}>
+        {/* BY PROPERTY */}
+        <Card>
+          <div style={sCss}>Performance by Property</div>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:"11px"}}><thead><tr>
+            {["Property","Total","Approved","Recovered","Override","Denied","Rate"].map((h,i)=><th key={i} style={tblHd(h)}>{h}</th>)}
+          </tr></thead><tbody>
+            {byProp.map((p,i)=><tr key={i}>
+              <td style={tblTd()}><span style={{color:B.white,fontWeight:600}}>{p.name}</span></td>
+              <td style={tblTd("center")}><span style={{fontFamily:fm}}>{p.total}</span></td>
+              <td style={tblTd("center")}><span style={{color:B.ok,fontFamily:fm}}>{p.approved}</span></td>
+              <td style={tblTd("center")}><span style={{color:B.gold400,fontFamily:fm}}>{p.recovered}</span></td>
+              <td style={tblTd("center")}><span style={{color:B.ov,fontFamily:fm}}>{p.overrides}</span></td>
+              <td style={tblTd("center")}><span style={{color:B.no,fontFamily:fm}}>{p.denied}</span></td>
+              <td style={tblTd("center")}><span style={{fontWeight:700,color:p.rate>=0.6?B.ok:B.no,fontFamily:fm}}>{pct(p.rate)}</span></td>
+            </tr>)}
+            <tr style={{borderTop:`2px solid ${B.gold500}`}}>
+              <td style={{...tblTd(),fontWeight:800,color:B.gold400}}>Total</td>
+              <td style={{...tblTd("center"),fontWeight:800,fontFamily:fm}}>{total}</td>
+              <td style={{...tblTd("center"),fontWeight:800,color:B.ok,fontFamily:fm}}>{approvedInit}</td>
+              <td style={{...tblTd("center"),fontWeight:800,color:B.gold400,fontFamily:fm}}>{recoveredAlt}</td>
+              <td style={{...tblTd("center"),fontWeight:800,color:B.ov,fontFamily:fm}}>{overrides}</td>
+              <td style={{...tblTd("center"),fontWeight:800,color:B.no,fontFamily:fm}}>{total-finalApproved}</td>
+              <td style={{...tblTd("center"),fontWeight:800,color:finalRate>=0.6?B.ok:B.no,fontFamily:fm}}>{pct(finalRate)}</td>
+            </tr>
+          </tbody></table>
+        </Card>
+
+        {/* BY AMI TIER */}
+        <Card>
+          <div style={sCss}>Performance by AMI Tier</div>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:"11px"}}><thead><tr>
+            {["AMI Tier","Total","Approved","Rate","Over Income","Below Min"].map((h,i)=><th key={i} style={tblHd(h)}>{h}</th>)}
+          </tr></thead><tbody>
+            {byTier.map((t,i)=><tr key={i}>
+              <td style={tblTd()}><span style={{color:B.gold400,fontWeight:700,fontFamily:fm}}>{(t.tier*100).toFixed(0)}%</span></td>
+              <td style={tblTd("center")}><span style={{fontFamily:fm}}>{t.total}</span></td>
+              <td style={tblTd("center")}><span style={{color:B.ok,fontFamily:fm}}>{t.approved}</span></td>
+              <td style={tblTd("center")}><span style={{fontWeight:700,color:t.rate>=0.5?B.ok:B.no,fontFamily:fm}}>{pct(t.rate)}</span></td>
+              <td style={tblTd("center")}><span style={{color:B.no,fontFamily:fm}}>{t.overIncome}</span></td>
+              <td style={tblTd("center")}><span style={{color:B.no,fontFamily:fm}}>{t.belowMin}</span></td>
+            </tr>)}
+          </tbody></table>
+
+          {/* ALT AMI RECOVERY */}
+          <div style={{...sCss,marginTop:"16px"}}>Alt AMI (80%) Recovery</div>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:"11px"}}><tbody>
+            <tr><td style={tblTd()}>Sent to Alt AMI Review</td><td style={{...tblTd("center"),fontFamily:fm,fontWeight:700}}>{sentToAlt}</td><td style={{...tblTd("right"),color:B.gray400,fontSize:"10px"}}>{total?pct(sentToAlt/total):"-"} of all applicants</td></tr>
+            <tr><td style={tblTd()}>Recovered (Approved at 80%)</td><td style={{...tblTd("center"),fontFamily:fm,fontWeight:700,color:B.ok}}>{recoveredAlt}</td><td style={{...tblTd("right"),color:B.gray400,fontSize:"10px"}}>{sentToAlt?pct(recoveredAlt/sentToAlt):"-"} recovery rate</td></tr>
+            <tr><td style={tblTd()}>Still Denied at Alt AMI</td><td style={{...tblTd("center"),fontFamily:fm,fontWeight:700,color:B.no}}>{stillDenied}</td><td style={{...tblTd("right"),color:B.gray400,fontSize:"10px"}}>Denied at both tiers</td></tr>
+            <tr style={{borderTop:`2px solid ${B.gold500}`}}><td style={{...tblTd(),fontWeight:800,color:B.gold400}}>Final Approval Rate</td><td style={{...tblTd("center"),fontFamily:fm,fontWeight:800,color:finalRate>=0.6?B.ok:B.no}}>{pct(finalRate)}</td><td style={{...tblTd("right"),color:B.gray400,fontSize:"10px"}}>{finalApproved} of {total} applicants</td></tr>
+          </tbody></table>
+        </Card>
+      </div>
+
+      {/* APPROVAL FUNNEL */}
+      <Card>
+        <div style={sCss}>Approval Funnel</div>
+        <div style={{display:"flex",gap:"20px",alignItems:"center",flexWrap:"wrap"}}>
+          {[
+            {label:"Total Applicants",count:total,color:B.white},
+            {label:"→ Approved (Initial)",count:approvedInit,color:B.ok},
+            {label:"→ Recovered at 80%",count:recoveredAlt,color:B.gold400},
+            {label:"→ Override Approved",count:overrides,color:B.ov},
+            {label:"→ Final Denied",count:total-finalApproved,color:B.no},
+          ].map((s,i)=>(
+            <div key={i} style={{textAlign:"center",minWidth:"100px"}}>
+              <div style={{fontSize:"24px",fontWeight:900,color:s.color,fontFamily:fm}}>{s.count}</div>
+              <div style={{fontSize:"10px",color:B.teal300,fontWeight:600}}>{s.label}</div>
+            </div>
+          ))}
+          <div style={{flex:1,minWidth:"200px"}}>
+            <div style={{height:"24px",borderRadius:"4px",overflow:"hidden",display:"flex",background:B.teal900,border:`1px solid ${B.teal600}`}}>
+              {total>0&&<><div style={{width:`${approvedInit/total*100}%`,background:B.ok,transition:"width 0.3s"}} title={`Approved: ${approvedInit}`}/>
+              <div style={{width:`${recoveredAlt/total*100}%`,background:B.gold500,transition:"width 0.3s"}} title={`Recovered: ${recoveredAlt}`}/>
+              <div style={{width:`${overrides/total*100}%`,background:B.ov,transition:"width 0.3s"}} title={`Override: ${overrides}`}/>
+              <div style={{width:`${(total-finalApproved)/total*100}%`,background:B.no,transition:"width 0.3s"}} title={`Denied: ${total-finalApproved}`}/></>}
+            </div>
+            <div style={{display:"flex",gap:"12px",marginTop:"4px",fontSize:"9px"}}>
+              <span style={{color:B.ok}}>■ Approved</span>
+              <span style={{color:B.gold500}}>■ Recovered</span>
+              <span style={{color:B.ov}}>■ Override</span>
+              <span style={{color:B.no}}>■ Denied</span>
+            </div>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 // ============================================================
 // ADMIN PANEL — Tabs: Income Limits (per county), Properties, Users
 // ============================================================
@@ -546,40 +704,61 @@ window.AMICalculator = function AMICalculator(){
     if(pr.result==="DENIED"&&ami<0.8){const au=prop.units.find(u=>u.bedrooms===br&&u.ami===0.8);ar=verify({tier:0.8,br,occ:eff,income:total,rent:au?au.marketRent:+rent,lim:countyLimits})}
   }
 
-  // History load
-  const histLoadedRef=useRef(false);
+  // History load — reload when switching to history or dashboard tab
+  const[histKey,setHistKey]=useState(0);
   useEffect(()=>{
-    if(tab==="history"&&CONFIG.isConfigured&&auth.user){
-      histLoadedRef.current=false; // allow reload when switching to tab
-    }
-  },[tab]);
-  useEffect(()=>{
-    if(tab!=="history"||!CONFIG.isConfigured||!auth.user||histLoadedRef.current)return;
-    histLoadedRef.current=true;
-    (async()=>{setHistLoad(true);try{const t=await auth.getToken();if(t)setHistory(await spHistory(t))}catch(e){console.error("History:",e)}setHistLoad(false)})();
-  },[tab,auth.user]);
+    if(tab!=="history"&&tab!=="dashboard"||!CONFIG.isConfigured||!auth.user)return;
+    let cancelled=false;
+    (async()=>{setHistLoad(true);try{const t=await auth.getToken();if(t&&!cancelled){const h=await spHistory(t);if(!cancelled)setHistory(h)}}catch(e){console.error("History:",e)}if(!cancelled)setHistLoad(false)})();
+    return()=>{cancelled=true};
+  },[histKey]);
+  useEffect(()=>{if((tab==="history"||tab==="dashboard")&&auth.user)setHistKey(k=>k+1)},[tab]);
 
   // Load history record into form
   const loadFromHistory=(rec)=>{
-    if(userRole==="manager"){
-      // Managers: open print view only (read-only reprint)
-      // We'll still populate but they can't submit
+    // Try full form restore from FormDataJSON
+    if(rec.FormDataJSON){
+      try{
+        const fd=JSON.parse(rec.FormDataJSON);
+        if(fd.applicants)setApplicants(fd.applicants);
+        if(fd.offers)setOffers(fd.offers);
+        if(fd.banks)setBanks(fd.banks);
+        if(fd.other)setOther(fd.other);
+        setPAN(fd.primaryApplicantName||"");
+        setReviewer(fd.reviewer||"");
+        setVDate(fd.vDate||new Date().toISOString().slice(0,10));
+        if(fd.propIdx!==undefined&&fd.propIdx!=="")setPropIdx(String(fd.propIdx));
+        setUnitNum(fd.unitNum||"");
+        setOcc(fd.occ||"");
+        setRent(fd.rent||"");
+        setNotes(fd.notes||"");
+        // Restore unit config after property index is set
+        setTimeout(()=>{
+          const pi=fd.propIdx!==""?+fd.propIdx:-1;
+          const p=properties[pi];
+          if(p&&fd.unitCfgKey){const[b,a]=fd.unitCfgKey.split("-").map(Number);const u=p.units.find(u=>u.bedrooms===b&&u.ami===a);if(u)setUnitCfg(u)}
+        },50);
+      }catch(e){console.error("FormData parse error:",e)}
+    }else{
+      // Fallback: restore from individual fields (legacy records without FormDataJSON)
+      const pi=properties.findIndex(p=>p.name===rec.Property);
+      if(pi>=0)setPropIdx(String(pi));
+      setPAN(rec.ApplicantName?.split(",")[0]||"");
+      setReviewer(rec.Reviewer||"");
+      setVDate(rec.DateCompleted?new Date(rec.DateCompleted).toISOString().slice(0,10):new Date().toISOString().slice(0,10));
+      setUnitNum(rec.UnitAddress||"");
+      setOcc(rec.Occupants?String(rec.Occupants):"");
+      setRent(rec.MonthlyRent?String(rec.MonthlyRent):"");
+      setNotes(rec.VerificationNotes||"");
+      setApplicants([{name:"",paystubs:["","","",""],paystubFrequency:""}]);
+      setOffers([{name:"",hourly:"",hoursPerWeek:"",salary:""}]);
+      setBanks([{name:"",deposits:["","",""]}]);
+      setOther([]);
+      setTimeout(()=>{
+        const p=properties[pi];
+        if(p){const u=p.units.find(u=>u.bedrooms===+rec.Bedrooms&&u.ami===+rec.AMITier);if(u)setUnitCfg(u)}
+      },50);
     }
-    // Find property index
-    const pi=properties.findIndex(p=>p.name===rec.Property);
-    if(pi>=0)setPropIdx(String(pi));
-    setPAN(rec.ApplicantName?.split(",")[0]||"");
-    setReviewer(rec.Reviewer||"");
-    setVDate(rec.DateCompleted?new Date(rec.DateCompleted).toISOString().slice(0,10):new Date().toISOString().slice(0,10));
-    setUnitNum(rec.UnitAddress||"");
-    setOcc(rec.Occupants?String(rec.Occupants):"");
-    setRent(rec.MonthlyRent?String(rec.MonthlyRent):"");
-    setNotes(rec.VerificationNotes||"");
-    // Set unit config after property loads
-    setTimeout(()=>{
-      const p=properties[pi];
-      if(p){const u=p.units.find(u=>u.bedrooms===+rec.Bedrooms&&u.ami===+rec.AMITier);if(u)setUnitCfg(u)}
-    },50);
     // Restore override state if exists
     if(rec.Result?.includes("Override")){setOverrideStatus("OVERRIDE_APPROVED");setOverrideBy(rec.OverrideBy||"");setOverrideNotesDisplay(rec.OverrideNotes||"")}
     else{setOverrideStatus(null);setOverrideBy("");setOverrideNotesDisplay("")}
@@ -591,6 +770,9 @@ window.AMICalculator = function AMICalculator(){
   const primaryApplicant=primaryApplicantName.trim()||coNames[0]||"";
   const allApplicantNames=[...new Set([primaryApplicant,...coNames].filter(Boolean))].join(", ");
   const fd={propertyName:prop?.name||"",unitNumber:unitNum,bedrooms:br,amiTier:ami,occupants:occ||anchorP(br),monthlyRent:rent,primaryApplicant,allApplicantNames};
+
+  // Build full form snapshot for history reload
+  const formSnapshot=()=>JSON.stringify({applicants,offers,banks,other,primaryApplicantName,reviewer,propIdx,unitNum,occ,rent,notes,vDate,unitCfgKey:unitCfg?`${unitCfg.bedrooms}-${unitCfg.ami}`:""});
 
   const handleSubmit=async()=>{
     if(!isApprover){setSubmitErr("Approver or Admin role required");setSubmitSt("error");return}
@@ -611,6 +793,7 @@ window.AMICalculator = function AMICalculator(){
         PaystubIncome:Math.round(pAnn*100)/100,OfferLetterIncome:Math.round(oAnn*100)/100,
         BankStatementIncome:Math.round(bAnn*100)/100,OtherIncome:Math.round(otAnn*100)/100,
         EffectivePersons:pr.eff,AnchorPersons:pr.anchor,VerificationNotes:notes,
+        FormDataJSON:formSnapshot(),
       });
       setLastSubmittedId(res?.id||null);
       setSubmitSt("success");setTimeout(()=>setSubmitSt("idle"),4000);
@@ -641,6 +824,7 @@ window.AMICalculator = function AMICalculator(){
           PaystubIncome:Math.round(pAnn*100)/100,OfferLetterIncome:Math.round(oAnn*100)/100,
           BankStatementIncome:Math.round(bAnn*100)/100,OtherIncome:Math.round(otAnn*100)/100,
           EffectivePersons:pr.eff,AnchorPersons:pr.anchor,VerificationNotes:notes,
+          FormDataJSON:formSnapshot(),
         });
       }
       setOverrideStatus("OVERRIDE_APPROVED");setOverrideBy(auth.user?.name||userEmail);setOverrideNotesDisplay(ovrNotes);setShowOverride(false);
@@ -684,7 +868,7 @@ window.AMICalculator = function AMICalculator(){
         </div>
         <div style={{display:"flex",gap:"6px",alignItems:"center"}}>
           <div style={{display:"flex",background:B.teal900,borderRadius:"4px",border:`1px solid ${B.teal600}`,marginRight:"8px"}}>
-            {[{key:"calculator",label:"Calculator"},{key:"history",label:"History"},{key:"admin",label:"⚙ Admin"}].map(t=>
+            {[{key:"calculator",label:"Calculator"},{key:"dashboard",label:"Dashboard"},{key:"history",label:"History"},{key:"admin",label:"⚙ Admin"}].map(t=>
               <button key={t.key} onClick={()=>setTab(t.key)} style={{background:tab===t.key?`${B.gold500}18`:"transparent",border:"none",color:tab===t.key?B.gold500:B.teal300,padding:"5px 12px",fontSize:"11px",fontWeight:700,cursor:"pointer",borderRadius:"3px",fontFamily:fb,textTransform:"uppercase",letterSpacing:"0.5px"}}>{t.label}</button>
             )}
           </div>
@@ -715,6 +899,9 @@ window.AMICalculator = function AMICalculator(){
 
         {/* ADMIN TAB — viewable by all roles, editable only by admin */}
         {tab==="admin"&&<AdminPanel counties={counties} properties={properties} users={users} onSave={handleAdminSave} saving={adminSaving} lastSaved={cfgSaved} isAdmin={isAdmin}/>}
+
+        {/* DASHBOARD TAB */}
+        {tab==="dashboard"&&<Dashboard history={history} properties={properties}/>}
 
         {/* HISTORY TAB — viewable by all roles */}
         {tab==="history"&&<HistoryPanel history={history} loading={histLoad} onSelect={loadFromHistory} userRole={userRole}/>}
