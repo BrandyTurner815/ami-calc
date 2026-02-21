@@ -83,6 +83,7 @@ const DEFAULT_PROPERTIES = [
     {bedrooms:3,ami:0.5,maxRent:1067,marketRent:1067,count:16},{bedrooms:3,ami:0.8,maxRent:1708,marketRent:1708,count:43}]},
 ];
 
+function localToday(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`}
 const PAY_FREQ=[{label:"Weekly",m:52},{label:"BiWeekly",m:26},{label:"Semi Monthly",m:24},{label:"Monthly",m:12}];
 const OTH_FREQ=[...PAY_FREQ,{label:"Bi Monthly",m:6},{label:"Quarterly",m:4},{label:"Semi Annually",m:2},{label:"Annually",m:1}];
 const OTH_TYPES=["Child Support","SSI/SSDI","Pension","VA Benefits","Unemployment","Self Employment","Interest/Dividends","W2 Verified Employment","Other"];
@@ -130,7 +131,7 @@ async function spWrite(tok,rec){const lid=await listId(tok,CONFIG.listName);if(!
 async function spUpdate(tok,itemId,fields){const lid=await listId(tok,CONFIG.listName);if(!lid)throw new Error("List not found");const r=await fetch(`${GRAPH}/sites/${CONFIG.siteId}/lists/${lid}/items/${itemId}`,{method:"PATCH",headers:{Authorization:`Bearer ${tok}`,"Content-Type":"application/json"},body:JSON.stringify({fields})});if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e?.error?.message||`Error ${r.status}`)}return r.json()}
 async function spHistory(tok,n=100){const lid=await listId(tok,CONFIG.listName);if(!lid)return[];const r=await fetch(`${GRAPH}/sites/${CONFIG.siteId}/lists/${lid}/items?$expand=fields&$top=${n}`,{headers:{Authorization:`Bearer ${tok}`}});if(!r.ok)return[];const d=await r.json();return(d.value||[]).map(i=>({...i.fields,_itemId:i.id})).sort((a,b)=>new Date(b.DateCompleted||0)-new Date(a.DateCompleted||0))}
 async function cfgLoad(tok){const lid=await listId(tok,CONFIG.configListName);if(!lid)return null;const r=await fetch(`${GRAPH}/sites/${CONFIG.siteId}/lists/${lid}/items?$expand=fields&$top=10&$orderby=fields/Modified desc`,{headers:{Authorization:`Bearer ${tok}`}});if(!r.ok)return null;const d=await r.json();if(!d.value?.length)return null;const f=d.value[0].fields;try{const counties=JSON.parse(f.IncomeLimitsJSON),properties=JSON.parse(f.PropertiesJSON);let users=null;try{users=JSON.parse(f.ModifiedByName.includes("[")?f.ModifiedByName:"{}")}catch{}if(!users&&f.Title?.startsWith("Config")){/* users stored in a separate field or within IncomeLimitsJSON */}return{itemId:d.value[0].id,counties,properties,users,lastModified:f.Modified}}catch{return null}}
-async function cfgSave(tok,counties,properties,users,modBy){const lid=await listId(tok,CONFIG.configListName);if(!lid)throw new Error("Config list not found");const fields={Title:`Config ${new Date().toISOString().slice(0,10)}`,IncomeLimitsJSON:JSON.stringify({counties,users}),PropertiesJSON:JSON.stringify(properties),ModifiedByName:modBy};const existing=await cfgLoad(tok);if(existing?.itemId){const r=await fetch(`${GRAPH}/sites/${CONFIG.siteId}/lists/${lid}/items/${existing.itemId}`,{method:"PATCH",headers:{Authorization:`Bearer ${tok}`,"Content-Type":"application/json"},body:JSON.stringify({fields})});if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e?.error?.message||`Error ${r.status}`)}return}const r=await fetch(`${GRAPH}/sites/${CONFIG.siteId}/lists/${lid}/items`,{method:"POST",headers:{Authorization:`Bearer ${tok}`,"Content-Type":"application/json"},body:JSON.stringify({fields})});if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e?.error?.message||`Error ${r.status}`)}}
+async function cfgSave(tok,counties,properties,users,modBy){const lid=await listId(tok,CONFIG.configListName);if(!lid)throw new Error("Config list not found");const fields={Title:`Config ${localToday()}`,IncomeLimitsJSON:JSON.stringify({counties,users}),PropertiesJSON:JSON.stringify(properties),ModifiedByName:modBy};const existing=await cfgLoad(tok);if(existing?.itemId){const r=await fetch(`${GRAPH}/sites/${CONFIG.siteId}/lists/${lid}/items/${existing.itemId}`,{method:"PATCH",headers:{Authorization:`Bearer ${tok}`,"Content-Type":"application/json"},body:JSON.stringify({fields})});if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e?.error?.message||`Error ${r.status}`)}return}const r=await fetch(`${GRAPH}/sites/${CONFIG.siteId}/lists/${lid}/items`,{method:"POST",headers:{Authorization:`Bearer ${tok}`,"Content-Type":"application/json"},body:JSON.stringify({fields})});if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e?.error?.message||`Error ${r.status}`)}}
 
 // ============================================================
 // UI COMPONENTS
@@ -741,7 +742,7 @@ window.AMICalculator = function AMICalculator(){
 
   // Calculator form state
   const[reviewer,setReviewer]=useState("");
-  const[vDate,setVDate]=useState(new Date().toISOString().slice(0,10));
+  const[vDate,setVDate]=useState(localToday());
   const[primaryApplicantName,setPAN]=useState("");
   const[propIdx,setPropIdx]=useState("");
   const[unitCfg,setUnitCfg]=useState(null);
@@ -810,7 +811,7 @@ window.AMICalculator = function AMICalculator(){
         if(fd.other)setOther(fd.other);
         setPAN(fd.primaryApplicantName||"");
         setReviewer(fd.reviewer||"");
-        setVDate(fd.vDate||new Date().toISOString().slice(0,10));
+        setVDate(fd.vDate||localToday());
         if(fd.propIdx!==undefined&&fd.propIdx!=="")setPropIdx(String(fd.propIdx));
         setUnitNum(fd.unitNum||"");
         setOcc(fd.occ||"");
@@ -829,7 +830,7 @@ window.AMICalculator = function AMICalculator(){
       if(pi>=0)setPropIdx(String(pi));
       setPAN(rec.ApplicantName?.split(",")[0]||"");
       setReviewer(rec.Reviewer||"");
-      setVDate(rec.DateCompleted?new Date(rec.DateCompleted).toISOString().slice(0,10):new Date().toISOString().slice(0,10));
+      setVDate(rec.DateCompleted?rec.DateCompleted.slice(0,10):localToday());
       setUnitNum(rec.UnitAddress||"");
       setOcc(rec.Occupants?String(rec.Occupants):"");
       setRent(rec.MonthlyRent?String(rec.MonthlyRent):"");
@@ -917,7 +918,7 @@ window.AMICalculator = function AMICalculator(){
   };
 
   const reset=()=>{
-    setPropIdx("");setUnitCfg(null);setUnitNum("");setOcc("");setRent("");setPAN("");setVDate(new Date().toISOString().slice(0,10));
+    setPropIdx("");setUnitCfg(null);setUnitNum("");setOcc("");setRent("");setPAN("");setVDate(localToday());
     setApplicants([{name:"",paystubs:["","","",""],paystubFrequency:""}]);
     setOffers([{name:"",hourly:"",hoursPerWeek:"",salary:""}]);
     setBanks([{name:"",deposits:["","",""]}]);
